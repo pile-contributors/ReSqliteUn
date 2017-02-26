@@ -70,6 +70,7 @@ macro    (resqliteunInit
     set(RESQLITEUN_HEADERS
         "resqliteun.h")
     set(RESQLITEUN_SOURCES
+        "resqliteun2.cc"
         "resqliteun.cc")
 
     pileSetSources(

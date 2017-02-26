@@ -22,6 +22,7 @@
 #include "resqliteun-private.h"
 
 #include <assert.h>
+#include <QStringBuilder>
 
 /*  INCLUDES    ============================================================ */
 //
@@ -93,6 +94,171 @@ bool ReSqliteUn::attachToTable ()
     RESQLITEUN_TRACE_ENTRY;
     bool b_ret = false;
     for (;;) {
+
+
+
+        b_ret = true;
+        break;
+    }
+    RESQLITEUN_TRACE_EXIT;
+    return b_ret;
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+/**
+ * The point of this method is to create an sql statement like the following:
+ *
+ * @code
+ * CREATE TEMP TRIGGER _u_Test_i
+ *     AFTER INSERT ON Test WHEN (SELECT undoable_active())=1
+ *     BEGIN UPDATE _sqlite_undo
+ *         SET sql=sql || 'DELETE FROM Test WHERE rowid='||NEW.rowid||';'
+ *         WHERE ROWID=(SELECT MAX(ROWID) FROM _sqlite_undo);
+ *     END;
+ * @endcode
+ *
+ * This creates a trigger that fires when a certain table (in this case called
+ * `Test`) gets a new row by in INSERT statement. The RWOID represents
+ * the internal id of the record (see http://sqlite.org/rowidtable.html).
+ *
+ * Once fired the trigger will write inside the `_sqlite_undo` table
+ * the statement that will undo current action.
+ */
+QString ReSqliteUn::sqlInsertTrigger (const QString & s_table)
+{
+    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_i "
+        "AFTER INSERT ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 "
+        "BEGIN UPDATE " RESQUN_TBL_TEMP " "
+            "SET sql=sql || 'DELETE FROM ") % s_table % QStringLiteral(" WHERE rowid='||NEW.rowid||';' "
+            "WHERE ROWID=(SELECT MAX(ROWID) FROM " RESQUN_TBL_TEMP ");"
+                                                                   "END;");
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+/**
+ * The point of this method is to create an sql statement like the following:
+ *
+ * @code
+ * CREATE TEMP TRIGGER _u_Test_d
+ *     BEFORE DELETE ON Test WHEN (SELECT undoable_active())=1
+ *     BEGIN UPDATE _sqlite_undo
+ *         SET sql=sql ||'INSERT INTO Test(rowid,id,data,data1) VALUES('||OLD.rowid||','||quote(OLD.id)||','||quote(OLD.data)||','||quote(OLD.data1)||');'
+ *         WHERE ROWID=(SELECT MAX(ROWID) FROM _sqlite_undo);
+ *     END;
+ * @endcode
+ *
+ * This creates a trigger that fires when a certain table (in this case called
+ * `Test`) looses a row in a DELETE statement. The RWOID represents
+ * the internal id of the record (see http://sqlite.org/rowidtable.html).
+ *
+ * Once fired the trigger will write inside the `_sqlite_undo` table
+ * the statement that will undo current action.
+ */
+QString ReSqliteUn::sqlDeleteTrigger (
+        const QString &s_table, const QString & s_column_list)
+{
+    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_d "
+             "BEFORE DELETE ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 "
+             "BEGIN UPDATE " RESQUN_TBL_TEMP " "
+                 "SET sql=sql ||'INSERT INTO ") % s_table % QStringLiteral("(rowid,id,data,data1) "
+                        "VALUES(") % s_column_list % QStringLiteral(");' "
+                 "WHERE ROWID=(SELECT MAX(ROWID) FROM " RESQUN_TBL_TEMP "); "
+             "END;");
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+/**
+ * There are two strategies when dealing with an UPDATE statement:
+ *
+ * 1. if the data in this table gets updated on a column by column basis
+ *    (there are a lot of columns and only a few of them get updated
+ *    at the same time) then it is more efficient to create triggers for
+ *    each individual column and coresponding undo entries (this method).
+ *
+ * 2. if, on the other hand, the entire row is saved every time or
+ *    the fields are rather small then it is moer efficient to create a single
+ *    trigger for the table and one entry for the entire row that is
+ *    being updated.
+ *
+ * The point of this method is to create an sql statement like the following:
+ *
+ * @code
+ * CREATE TEMP TRIGGER _u_Test_u_data
+ *     AFTER UPDATE OF data ON Test WHEN (SELECT undoable_active())=1
+ *     BEGIN UPDATE _sqlite_undo
+ *         SET sql=sql || 'UPDATE Test SET data WHERE rowid='||OLD.rowid||';'
+ *         WHERE ROWID=(SELECT MAX(ROWID) FROM _sqlite_undo);
+ *     END;
+ * @endcode
+ *
+ */
+QString ReSqliteUn::sqlUpdateTriggerPerColumn (
+        const QString &s_table, const QString &s_column)
+{
+    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_u_") % s_column % QStringLiteral(" "
+             "AFTER UPDATE OF ") % s_column % QStringLiteral(" ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 "
+             "BEGIN UPDATE " RESQUN_TBL_TEMP " "
+                 "SET sql=sql || 'UPDATE ") % s_table % QStringLiteral(" SET ") % s_column % QStringLiteral(" WHERE rowid='||OLD.rowid||';' "
+                 "WHERE ROWID=(SELECT MAX(ROWID) FROM " RESQUN_TBL_TEMP ");"
+             "END;");
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+/**
+ * There are two strategies when dealing with an UPDATE statement:
+ *
+ * 1. if the data in this table gets updated on a column by column basis
+ *    (there are a lot of columns and only a few of them get updated
+ *    at the same time) then it is more efficient to create triggers for
+ *    each individual column and coresponding undo entries.
+ *
+ * 2. if, on the other hand, the entire row is saved every time or
+ *    the fields are rather small then it is moer efficient to create a single
+ *    trigger for the table and one entry for the entire row that is
+ *    being updated (this method).
+ *
+ * The point of this method is to create an sql statement like the following:
+ *
+ * @code
+ * CREATE TEMP TRIGGER _u_Test_u
+ *     AFTER UPDATE ON Test WHEN (SELECT undoable_active())=1
+ *     BEGIN UPDATE _sqlite_undo
+ *         SET sql=sql || 'UPDATE Test SET data='||quote(OLD.data)||',data1='||quote(OLD.data1)||' WHERE rowid='||OLD.rowid||';'
+ *         WHERE ROWID=(SELECT MAX(ROWID) FROM _sqlite_undo);
+ *     END;
+ * @endcode
+ *
+ */
+QString ReSqliteUn::sqlUpdateTriggerPerTable (const QString &s_table, const QString & s_column_list)
+{
+    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_u "
+         "AFTER UPDATE ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 "
+         "BEGIN UPDATE " RESQUN_TBL_TEMP " "
+             "SET sql=sql || 'UPDATE ") % s_table % QStringLiteral(" SET ") % s_column_list % QStringLiteral(" WHERE rowid='||OLD.rowid||';' "
+             "WHERE ROWID=(SELECT MAX(ROWID) FROM " RESQUN_TBL_TEMP "); "
+         "END; ");
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+/**
+ * We're adding a table to the list of tables managed by the
+ * undo-redo mechanism.
+ */
+bool ReSqliteUn::attachToTable (const QString & table, int)
+{
+    RESQLITEUN_TRACE_ENTRY;
+    bool b_ret = false;
+    for (;;) {
+
+
+
+
+
 
 
 

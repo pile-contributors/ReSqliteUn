@@ -7,10 +7,10 @@ The code was only tested against version 3.16.2 of the sqlite source
 distribution that may be found in the helper repository.
 
 
-> This plugin was inspired by sqlite-undo project available at
+> This plugin was inspired by sqlite-undo project by Simon Naunton available at
 > https://sourceforge.net/projects/sqlite-undo. However,
 > as that code is under [GPL v3 license][7], a new implementation was
-> required by the project that I currently work on. The names of the
+> required by the project that I currently work on. The names of the sql
 > functions are similar to those used in that code, with a unique
 > prefix to distinguish between them.
 > (Nicu Tofan, February 26, 2017).

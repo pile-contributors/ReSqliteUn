@@ -40,9 +40,12 @@ SQLITE_EXTENSION_INIT1
 extern "C" {
 
 /* ------------------------------------------------------------------------- */
-//! Helper for registering functions.
-static void helper_register_func (ReSqliteUn * p_app)
+//! Helper for retrieving strings from values.
+static QString value2string (sqlite3_value * value)
 {
+    return QString(reinterpret_cast<const QChar *>(
+                       sqlite3_value_text16 (value)),
+                       sqlite3_value_bytes16 (value) / sizeof(QChar));
 }
 /* ========================================================================= */
 
@@ -51,27 +54,58 @@ static void helper_register_func (ReSqliteUn * p_app)
 /* ------------------------------------------------------------------------- */
 //! Implementation of the `table` function.
 static void epoint_table (
-        sqlite3_context *context, int argc, sqlite3_value **argv)
+            sqlite3_context *context, int argc, sqlite3_value **argv)
 {
-    ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
-    assert(p_app != NULL);
+    RESQLITEUN_TRACE_ENTRY;
+    bool b_ret = false;
+    for (;;) {
 
+        ReSqliteUn * p_app = static_cast<ReSqliteUn *>(
+                    sqlite3_user_data (context));
+        assert(p_app != NULL);
 
-    if ((sqlite3_value_type(argv[0]) != SQLITE_TEXT)) {
-        sqlite3_result_error (context,
-                "First argument to " RESQUN_FUN_TABLE " must be a sting", -1);
-        return;
+        // Check arguments types.
+        if ((sqlite3_value_type(argv[0]) != SQLITE_TEXT)) {
+            sqlite3_result_error (context,
+                                  "First argument to " RESQUN_FUN_TABLE " must be a sting", -1);
+            break;
+        }
+        if ((sqlite3_value_type(argv[1]) != SQLITE_INTEGER)) {
+            sqlite3_result_error (context,
+                                  "Second argument to " RESQUN_FUN_TABLE " must be an integer", -1);
+            return;
+        }
+
+        // Check arguments values.
+        int update_type = sqlite3_value_int(argv[1]);
+        QString table = value2string(argv[0]);
+        if (table.length() == 0) {
+            sqlite3_result_error (
+                        context,
+                        "First argument to " RESQUN_FUN_TABLE
+                        " must be a non-empty string", -1);
+            break;
+        }
+
+        db = sqlite3_context_db_handle(context);
+        assert(db == p_app->db_);
+
+        if (!p_app->attachToTable (table, update_type)) {
+            sqlite3_result_error (context, RESQUN_FUN_TABLE "failed", -1);
+            break;
+        }
+
+        b_ret = true;
+        break;
     }
-
-
-    p_app->attachToTable ();
+    RESQLITEUN_TRACE_EXIT;
 }
 /* ========================================================================= */
 
 /* ------------------------------------------------------------------------- */
 //! Implementation of the `active` function.
 static void epoint_active (
-        sqlite3_context *context, int argc, sqlite3_value **argv)
+            sqlite3_context *context, int argc, sqlite3_value **argv)
 {
     ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
     assert(p_app != NULL);
@@ -83,7 +117,7 @@ static void epoint_active (
 /* ------------------------------------------------------------------------- */
 //! Implementation of the `begin` function.
 static void epoint_begin (
-        sqlite3_context *context, int argc, sqlite3_value **argv)
+            sqlite3_context *context, int argc, sqlite3_value **argv)
 {
     ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
     assert(p_app != NULL);
@@ -95,7 +129,7 @@ static void epoint_begin (
 /* ------------------------------------------------------------------------- */
 //! Implementation of the `end` function.
 static void epoint_end (
-        sqlite3_context *context, int argc, sqlite3_value **argv)
+            sqlite3_context *context, int argc, sqlite3_value **argv)
 {
     ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
     assert(p_app != NULL);
@@ -107,7 +141,7 @@ static void epoint_end (
 /* ------------------------------------------------------------------------- */
 //! Implementation of the `undo` function.
 static void epoint_undo (
-        sqlite3_context *context, int argc, sqlite3_value **argv)
+            sqlite3_context *context, int argc, sqlite3_value **argv)
 {
     ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
     assert(p_app != NULL);
@@ -119,7 +153,7 @@ static void epoint_undo (
 /* ------------------------------------------------------------------------- */
 //! Implementation of the `redo` function.
 static void epoint_redo (
-        sqlite3_context *context, int argc, sqlite3_value **argv)
+            sqlite3_context *context, int argc, sqlite3_value **argv)
 {
     ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
     assert(p_app != NULL);
@@ -140,7 +174,7 @@ static void epoint_destroy (void *value)
 /* ------------------------------------------------------------------------- */
 //! The entry point used by sqlite.
 RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
-        sqlite3 *db, char **pzErrMsg, const sqlite3_api_routines *pApi)
+            sqlite3 *db, char **pzErrMsg, const sqlite3_api_routines *pApi)
 {
     int rc = SQLITE_OK;
     for (;;) {
@@ -160,8 +194,8 @@ RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
                     /* xDestroy */ epoint_destroy);
         if (rc != SQLITE_OK) {
             *pzErrMsg = sqlite3_mprintf ("Failed to register function `"
-                    RESQUN_FUN_TABLE "`: %s\n",
-                    sqlite3_errmsg(db));
+                                         RESQUN_FUN_TABLE "`: %s\n",
+                                         sqlite3_errmsg(db));
             break;
         }
 
@@ -177,8 +211,8 @@ RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
                     /* xDestroy */ NULL);
         if (rc != SQLITE_OK) {
             *pzErrMsg = sqlite3_mprintf ("Failed to register function `"
-                    RESQUN_FUN_ACTIVE "`: %s\n",
-                    sqlite3_errmsg(db));
+                                         RESQUN_FUN_ACTIVE "`: %s\n",
+                                         sqlite3_errmsg(db));
             break;
         }
 
@@ -194,8 +228,8 @@ RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
                     /* xDestroy */ NULL);
         if (rc != SQLITE_OK) {
             *pzErrMsg = sqlite3_mprintf ("Failed to register function `"
-                    RESQUN_FUN_BEGIN "`: %s\n",
-                    sqlite3_errmsg(db));
+                                         RESQUN_FUN_BEGIN "`: %s\n",
+                                         sqlite3_errmsg(db));
             break;
         }
 
@@ -211,8 +245,8 @@ RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
                     /* xDestroy */ NULL);
         if (rc != SQLITE_OK) {
             *pzErrMsg = sqlite3_mprintf ("Failed to register function `"
-                    RESQUN_FUN_END "`: %s\n",
-                    sqlite3_errmsg(db));
+                                         RESQUN_FUN_END "`: %s\n",
+                                         sqlite3_errmsg(db));
             break;
         }
 
@@ -228,8 +262,8 @@ RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
                     /* xDestroy */ NULL);
         if (rc != SQLITE_OK) {
             *pzErrMsg = sqlite3_mprintf ("Failed to register function `"
-                    RESQUN_FUN_UNDO "`: %s\n",
-                    sqlite3_errmsg(db));
+                                         RESQUN_FUN_UNDO "`: %s\n",
+                                         sqlite3_errmsg(db));
             break;
         }
 
@@ -245,8 +279,8 @@ RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
                     /* xDestroy */ NULL);
         if (rc != SQLITE_OK) {
             *pzErrMsg = sqlite3_mprintf ("Failed to register function `"
-                    RESQUN_FUN_REDO "`: %s\n",
-                    sqlite3_errmsg(db));
+                                         RESQUN_FUN_REDO "`: %s\n",
+                                         sqlite3_errmsg(db));
             break;
         }
 

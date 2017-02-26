@@ -61,18 +61,23 @@
 
 #ifndef RESQUN_FUN_END
 //! Name of the function used for .
-#define RESQUN_FUN_END    RESQUN_PREFIX "end"
+#define RESQUN_FUN_END      RESQUN_PREFIX "end"
 #endif // RESQUN_FUN_END
 
 #ifndef RESQUN_FUN_UNDO
 //! Name of the function used for performing an undo step.
-#define RESQUN_FUN_UNDO    RESQUN_PREFIX "undo"
+#define RESQUN_FUN_UNDO     RESQUN_PREFIX "undo"
 #endif // RESQUN_FUN_UNDO
 
 #ifndef RESQUN_FUN_REDO
 //! Name of the function used for performing an redo step.
-#define RESQUN_FUN_REDO    RESQUN_PREFIX "redo"
+#define RESQUN_FUN_REDO     RESQUN_PREFIX "redo"
 #endif // RESQUN_FUN_REDO
+
+#ifndef RESQUN_TBL_TEMP
+//! The table to be used for storing undo-redo stack.
+#define RESQUN_TBL_TEMP     RESQUN_PREFIX "sqlite_undo"
+#endif // RESQUN_TBL_TEMP
 
 /** @} */
 
@@ -130,6 +135,12 @@ public:
     bool
     attachToTable();
 
+    //! Prepare the database to track this table.
+    bool
+    attachToTable (
+            const QString & table,
+            int flags);
+
 public:
 
     //! The one and only instance.
@@ -150,6 +161,29 @@ public:
 protected:
 
 private:
+
+    //! Compute the sql string for insert trigger.
+    QString
+    sqlInsertTrigger (
+            const QString &s_table);
+
+    //! Compute the sql string for delete trigger.
+    QString
+    sqlDeleteTrigger (
+            const QString &s_table,
+            const QString &s_column_list);
+
+    //! Compute the sql string for update trigger.
+    QString
+    sqlUpdateTriggerPerColumn (
+            const QString &s_table,
+            const QString &s_colum);
+
+    //! Compute the sql string for update trigger.
+    QString
+    sqlUpdateTriggerPerTable (
+            const QString &s_table,
+            const QString &s_column_list);
 
     /*  FUNCTIONS    ======================================================= */
     //

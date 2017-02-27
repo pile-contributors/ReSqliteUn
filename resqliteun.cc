@@ -71,11 +71,13 @@ static void epoint_table (
         if ((sqlite3_value_type(argv[0]) != SQLITE_TEXT)) {
             sqlite3_result_error (context,
                                   "First argument to " RESQUN_FUN_TABLE " must be a sting", -1);
+            sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
             break;
         }
         if ((sqlite3_value_type(argv[1]) != SQLITE_INTEGER)) {
             sqlite3_result_error (context,
                                   "Second argument to " RESQUN_FUN_TABLE " must be an integer", -1);
+            sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
             return;
         }
 
@@ -90,6 +92,7 @@ static void epoint_table (
                         context,
                         "Second argument to " RESQUN_FUN_TABLE
                         " must be 0, 1 or 2", -1);
+            sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
             break;
         }
 
@@ -99,6 +102,7 @@ static void epoint_table (
                         context,
                         "First argument to " RESQUN_FUN_TABLE
                         " must be a non-empty string", -1);
+            sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
             break;
         }
 
@@ -128,7 +132,7 @@ static void epoint_active (
     ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
     assert(p_app != NULL);
 
-    p_app->attachToTable ();
+    sqlite3_result_int (context, p_app->is_active_);
 }
 /* ========================================================================= */
 
@@ -137,22 +141,146 @@ static void epoint_active (
 static void epoint_begin (
             sqlite3_context *context, int argc, sqlite3_value **argv)
 {
-    ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
-    assert(p_app != NULL);
+    for (;;) {
+        ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
+        assert(p_app != NULL);
 
-    p_app->attachToTable ();
+        if (p_app->is_active_) {
+            sqlite3_result_error(context, "Already in an update", -1);
+            break;
+        }
+
+        sqlite3 * db = sqlite3_context_db_handle(context);
+        assert(db == static_cast<sqlite3 *>(p_app->db_));
+
+        // Remove all "redo" entries and place a marker for first undo entry.
+        int rc = sqlite3_exec(
+            db,
+            "SAVEPOINT " RESQUN_SVP_BEGIN ";"
+            "DELETE FROM " RESQUN_TBL_TEMP " WHERE status=" RESQUN_MARK_REDO ";"
+            "INSERT INTO " RESQUN_TBL_TEMP "(sql, status) VALUES(''," RESQUN_MARK_UNDO ");",
+            NULL, NULL, NULL);
+        if (rc != SQLITE_OK) {
+            sqlite3_exec (db,
+                "ROLLBACK TO SAVEPOINT " RESQUN_SVP_BEGIN,
+                NULL, NULL, NULL);
+            sqlite3_result_error_code (context, rc);
+        } else {
+            p_app->is_active_ = true;
+        }
+        sqlite3_exec (db,"RELEASE SAVEPOINT " RESQUN_SVP_BEGIN,
+                NULL, NULL, NULL);
+
+        break;
+    }
 }
 /* ========================================================================= */
 
 /* ------------------------------------------------------------------------- */
 //! Implementation of the `end` function.
+#define STR_END_USAGE \
+            "0 (for no output), "\
+            "1 (to return the number of undo enttries as an integer), "\
+            "2 (to return the number of redo enttries as an integer), "\
+            "3 (to return an array as a blob with undo and redo count), "\
+            "or 4 (to print the undo and redo as text"
 static void epoint_end (
             sqlite3_context *context, int argc, sqlite3_value **argv)
 {
-    ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
-    assert(p_app != NULL);
+    sqlite3_stmt *stmt = NULL;
+    for (;;) {
+        if (argc > 1) {
+            sqlite3_result_error (
+                        context,
+                        RESQUN_FUN_END " takes zero or one argument", -1);
+            sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
+            return;
+        }
 
-    p_app->attachToTable ();
+        ReSqliteUn * p_app =
+                static_cast<ReSqliteUn *>(sqlite3_user_data (context));
+        assert(p_app != NULL);
+
+        if (!p_app->is_active_) {
+            sqlite3_result_error(context, "Not in an update", -1);
+            break;
+        }
+
+        sqlite3 * db = sqlite3_context_db_handle(context);
+        assert(db == static_cast<sqlite3 *>(p_app->db_));
+
+        qint64 entries[2];
+        int rc = p_app->count (entries[0], entries[1]);
+        if (rc != SQLITE_OK) {
+            sqlite3_result_error(
+                        context,
+                        "Failed to retrieve values from temporary table",
+                        -1);
+            sqlite3_result_error_code (context, rc);
+            break;
+        }
+
+
+        enum EndOutputType {
+            NoOutput = 0,
+            UndoCountAsInt = 1,
+            RedoCountAsInt = 2,
+            BothAs64bitArray = 3,
+            BothAsText = 4,
+
+            EndOutputTypeMax
+        };
+        EndOutputType ty = BothAsText;
+
+        if (argc > 0) {
+            if ((sqlite3_value_type(argv[1]) != SQLITE_INTEGER)) {
+                sqlite3_result_error (context,
+                                      "First argument to " RESQUN_FUN_END
+                                      " must be an integer "
+                                      STR_END_USAGE, -1);
+                sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
+                return;
+            }
+            EndOutputType ty = static_cast<EndOutputType>(
+                        sqlite3_value_int(argv[1]));
+            if ((ty < 0) || (ty >= EndOutputTypeMax)) {
+                sqlite3_result_error (context,
+                                      "First argument to " RESQUN_FUN_END " must be "
+                                      STR_END_USAGE, -1);
+                sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
+                return;
+            }
+
+        }
+
+        switch (ty) {
+        case NoOutput: {
+            break; }
+        case UndoCountAsInt: {
+            sqlite3_result_int64 (context, entries[0]);
+            break; }
+        case RedoCountAsInt: {
+            sqlite3_result_int64 (context, entries[1]);
+            break; }
+        case BothAs64bitArray: {
+            sqlite3_result_blob(context, &entries, sizeof(entries), SQLITE_TRANSIENT);
+            break; }
+        case BothAsText: {
+            char *result;
+            result = sqlite3_mprintf (
+                        "UNDO=%lld\nREDO=%lld",
+                        entries[0], entries[1]);
+            sqlite3_result_text (context, result, -1, sqlite3_free);
+            break; }
+        }
+
+        p_app->is_active_ = false;
+        break;
+    }
+
+    if (stmt != NULL) {
+        sqlite3_finalize(stmt);
+    }
 }
 /* ========================================================================= */
 

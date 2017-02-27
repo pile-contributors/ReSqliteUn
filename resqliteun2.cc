@@ -33,6 +33,10 @@
 
 const char * ReSqliteUn::s_prefix_ = RESQUN_PREFIX;
 const char * ReSqliteUn::s_fun_table_ = RESQUN_FUN_TABLE;
+const char * ReSqliteUn::s_sql_ur_count_ =
+        "SELECT "
+        "(SELECT COUNT(*) FROM " RESQUN_TBL_TEMP " WHERE status=" RESQUN_MARK_UNDO ") AS UNDO,"
+        "(SELECT COUNT(*) FROM " RESQUN_TBL_TEMP " WHERE status=" RESQUN_MARK_REDO ") AS REDO;";
 
 ReSqliteUn * ReSqliteUn::instance_ = NULL;
 
@@ -68,7 +72,8 @@ static QString empty;
  */
 ReSqliteUn::ReSqliteUn (
         void *db) :
-    db_ (db)
+    db_ (db),
+    is_active_ (false)
 {
     RESQLITEUN_TRACE_ENTRY;
 
@@ -393,6 +398,47 @@ bool ReSqliteUn::attachToTable (
     }
     RESQLITEUN_TRACE_EXIT;
     return b_ret;
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+/**
+ * @warning The result is the error code (SQLITE_OK if all went well).
+ *
+ * @param undo_entries Resulted undo entries
+ * @param redo_entries Resulted redo entries
+ * @return error code
+ */
+int ReSqliteUn::count (qint64 &undo_entries, qint64 &redo_entries)
+{
+    int rc = SQLITE_OK;
+    sqlite3_stmt *stmt = NULL;
+    for (;;) {
+        int rc = sqlite3_prepare_v2 (
+                    static_cast<sqlite3 *>(db_),
+                    s_sql_ur_count_, -1, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+
+            break;
+        }
+
+        rc = sqlite3_step (stmt);
+        if (rc != SQLITE_ROW) {
+
+            break;
+        }
+
+        undo_entries = sqlite3_column_int64 (stmt, 0);
+        redo_entries = sqlite3_column_int64 (stmt, 1);
+
+        rc = SQLITE_OK;
+        break;
+    }
+
+    if (stmt != NULL) {
+        sqlite3_finalize(stmt);
+    }
+    return rc;
 }
 /* ========================================================================= */
 

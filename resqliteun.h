@@ -79,6 +79,29 @@
 #define RESQUN_TBL_TEMP     RESQUN_PREFIX "sqlite_undo"
 #endif // RESQUN_TBL_TEMP
 
+#ifndef RESQUN_SVP_BEGIN
+//! Name of the savepoint used in `begin` command.
+#define RESQUN_SVP_BEGIN    RESQUN_PREFIX "begin_svp"
+#endif // RESQUN_SVP_BEGIN
+
+#ifndef RESQUN_SVP_UNDO
+//! Name of the savepoint used in `undo` command.
+#define RESQUN_SVP_UNDO    RESQUN_PREFIX "und_svp"
+#endif // RESQUN_SVP_UNDO
+
+#ifndef RESQUN_MARK_UNDO
+//! Marker used in temporary table to indicate an UNDO entry.
+#define RESQUN_MARK_UNDO    "'U'"
+#endif // RESQUN_MARK_UNDO
+
+#ifndef RESQUN_MARK_REDO
+//! Marker used in temporary table to indicate an REDO entry.
+#define RESQUN_MARK_REDO    "'R'"
+#endif // RESQUN_MARK_REDO
+
+
+
+
 /** @} */
 
 
@@ -119,11 +142,15 @@ public:
 public:
 
     void * db_; /**< the actual sqlite database */
+    bool is_active_;
 
     static const char * s_prefix_; /**< The prefix used by all methods
         inside sqlite environment. */
     static const char * s_fun_table_; /**< Name of the function used for adding
         a table to thelist monitored by this module. */
+
+    static const char * s_sql_ur_count_; /**< sql statement for finding out
+                                              how many entries are in the table. */
 
     static ReSqliteUn * instance_; /**< the one and only instance */
 
@@ -153,6 +180,12 @@ public:
             void *ctx,
             const QString & table,
             UpdateBehaviour update_kind);
+
+    //! Get the number of entries in the temporary table by kind.
+    int
+    count (
+            qint64 & undo_entries,
+            qint64 & redo_entries);
 
 public:
 

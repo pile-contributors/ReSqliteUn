@@ -97,6 +97,18 @@ class RESQLITEUN_EXPORT ReSqliteUn {
     //
     /*  DEFINITIONS    ----------------------------------------------------- */
 
+public:
+
+    //! How to deal with updates.
+    enum UpdateBehaviour {
+        NoTriggerForUpdate         = 0, /**< updates are not tracked; inserts
+                                             and deletions are still tracked */
+        OneTriggerPerUpdatedTable  = 1, /**< create a single trigger
+                                             for this table */
+        OneTriggerPerUpdatedColumn = 2  /**< create one trigger for each
+                                             column of the table */
+    };
+
     /*  DEFINITIONS    ===================================================== */
     //
     //
@@ -138,8 +150,9 @@ public:
     //! Prepare the database to track this table.
     bool
     attachToTable (
+            void *ctx,
             const QString & table,
-            int flags);
+            UpdateBehaviour update_kind);
 
 public:
 
@@ -162,6 +175,12 @@ protected:
 
 private:
 
+    //! The sql statements that create triggers for a table.
+    QString
+    sqlTriggers (
+            const QString &table,
+            UpdateBehaviour update_kind);
+
     //! Compute the sql string for insert trigger.
     QString
     sqlInsertTrigger (
@@ -171,7 +190,8 @@ private:
     QString
     sqlDeleteTrigger (
             const QString &s_table,
-            const QString &s_column_list);
+            const QString & s_column_names,
+            const QString & s_column_values);
 
     //! Compute the sql string for update trigger.
     QString

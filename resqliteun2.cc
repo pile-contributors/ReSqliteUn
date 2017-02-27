@@ -39,6 +39,9 @@ ReSqliteUn * ReSqliteUn::instance_ = NULL;
 typedef void(*xEntryPoint)(void);
 xEntryPoint getEntryPoint ();
 
+static QLatin1String comma (",");
+static QString empty;
+
 /*  DEFINITIONS    ========================================================= */
 //
 //
@@ -110,11 +113,11 @@ bool ReSqliteUn::attachToTable ()
  * The point of this method is to create an sql statement like the following:
  *
  * @code
- * CREATE TEMP TRIGGER _u_Test_i
- *     AFTER INSERT ON Test WHEN (SELECT undoable_active())=1
- *     BEGIN UPDATE _sqlite_undo
+ * CREATE TEMP TRIGGER resqun_Test_i
+ *     AFTER INSERT ON Test WHEN (SELECT resqun_active())=1
+ *     BEGIN UPDATE resqun_sqlite_undo
  *         SET sql=sql || 'DELETE FROM Test WHERE rowid='||NEW.rowid||';'
- *         WHERE ROWID=(SELECT MAX(ROWID) FROM _sqlite_undo);
+ *         WHERE ROWID=(SELECT MAX(ROWID) FROM resqun_sqlite_undo);
  *     END;
  * @endcode
  *
@@ -122,17 +125,17 @@ bool ReSqliteUn::attachToTable ()
  * `Test`) gets a new row by in INSERT statement. The RWOID represents
  * the internal id of the record (see http://sqlite.org/rowidtable.html).
  *
- * Once fired the trigger will write inside the `_sqlite_undo` table
+ * Once fired the trigger will write inside the `resqun_sqlite_undo` table
  * the statement that will undo current action.
  */
 QString ReSqliteUn::sqlInsertTrigger (const QString & s_table)
 {
-    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_i "
-        "AFTER INSERT ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 "
-        "BEGIN UPDATE " RESQUN_TBL_TEMP " "
-            "SET sql=sql || 'DELETE FROM ") % s_table % QStringLiteral(" WHERE rowid='||NEW.rowid||';' "
-            "WHERE ROWID=(SELECT MAX(ROWID) FROM " RESQUN_TBL_TEMP ");"
-                                                                   "END;");
+    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_i \n"
+        "AFTER INSERT ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 \n"
+        "BEGIN UPDATE " RESQUN_TBL_TEMP " \n"
+            "SET sql=sql || 'DELETE FROM ") % s_table % QStringLiteral(" WHERE rowid='||NEW.rowid||';' \n"
+            "WHERE ROWID=(SELECT MAX(ROWID) FROM " RESQUN_TBL_TEMP ");\n"
+        "END;\n");
 }
 /* ========================================================================= */
 
@@ -141,11 +144,11 @@ QString ReSqliteUn::sqlInsertTrigger (const QString & s_table)
  * The point of this method is to create an sql statement like the following:
  *
  * @code
- * CREATE TEMP TRIGGER _u_Test_d
- *     BEFORE DELETE ON Test WHEN (SELECT undoable_active())=1
- *     BEGIN UPDATE _sqlite_undo
+ * CREATE TEMP TRIGGER resqun_Test_d
+ *     BEFORE DELETE ON Test WHEN (SELECT resqun_active())=1
+ *     BEGIN UPDATE resqun_sqlite_undo
  *         SET sql=sql ||'INSERT INTO Test(rowid,id,data,data1) VALUES('||OLD.rowid||','||quote(OLD.id)||','||quote(OLD.data)||','||quote(OLD.data1)||');'
- *         WHERE ROWID=(SELECT MAX(ROWID) FROM _sqlite_undo);
+ *         WHERE ROWID=(SELECT MAX(ROWID) FROM resqun_sqlite_undo);
  *     END;
  * @endcode
  *
@@ -153,19 +156,20 @@ QString ReSqliteUn::sqlInsertTrigger (const QString & s_table)
  * `Test`) looses a row in a DELETE statement. The RWOID represents
  * the internal id of the record (see http://sqlite.org/rowidtable.html).
  *
- * Once fired the trigger will write inside the `_sqlite_undo` table
+ * Once fired the trigger will write inside the `resqun_sqlite_undo` table
  * the statement that will undo current action.
  */
 QString ReSqliteUn::sqlDeleteTrigger (
-        const QString &s_table, const QString & s_column_list)
+        const QString &s_table, const QString & s_column_names,
+        const QString & s_column_values)
 {
-    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_d "
-             "BEFORE DELETE ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 "
-             "BEGIN UPDATE " RESQUN_TBL_TEMP " "
-                 "SET sql=sql ||'INSERT INTO ") % s_table % QStringLiteral("(rowid,id,data,data1) "
-                        "VALUES(") % s_column_list % QStringLiteral(");' "
-                 "WHERE ROWID=(SELECT MAX(ROWID) FROM " RESQUN_TBL_TEMP "); "
-             "END;");
+    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_d \n"
+             "BEFORE DELETE ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 \n"
+             "BEGIN UPDATE " RESQUN_TBL_TEMP " \n"
+                 "SET sql=sql ||'INSERT INTO ") % s_table % QStringLiteral("(rowid") % s_column_names % QStringLiteral(") "
+                        "VALUES('||OLD.rowid||',") % s_column_values % QStringLiteral(");' \n"
+                 "WHERE ROWID=(SELECT MAX(ROWID) FROM " RESQUN_TBL_TEMP "); \n"
+             "END;\n\n");
 }
 /* ========================================================================= */
 
@@ -186,11 +190,11 @@ QString ReSqliteUn::sqlDeleteTrigger (
  * The point of this method is to create an sql statement like the following:
  *
  * @code
- * CREATE TEMP TRIGGER _u_Test_u_data
- *     AFTER UPDATE OF data ON Test WHEN (SELECT undoable_active())=1
- *     BEGIN UPDATE _sqlite_undo
+ * CREATE TEMP TRIGGER resqun_Test_u_data
+ *     AFTER UPDATE OF data ON Test WHEN (SELECT resqun_active())=1
+ *     BEGIN UPDATE resqun_sqlite_undo
  *         SET sql=sql || 'UPDATE Test SET data WHERE rowid='||OLD.rowid||';'
- *         WHERE ROWID=(SELECT MAX(ROWID) FROM _sqlite_undo);
+ *         WHERE ROWID=(SELECT MAX(ROWID) FROM resqun_sqlite_undo);
  *     END;
  * @endcode
  *
@@ -198,12 +202,12 @@ QString ReSqliteUn::sqlDeleteTrigger (
 QString ReSqliteUn::sqlUpdateTriggerPerColumn (
         const QString &s_table, const QString &s_column)
 {
-    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_u_") % s_column % QStringLiteral(" "
-             "AFTER UPDATE OF ") % s_column % QStringLiteral(" ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 "
-             "BEGIN UPDATE " RESQUN_TBL_TEMP " "
-                 "SET sql=sql || 'UPDATE ") % s_table % QStringLiteral(" SET ") % s_column % QStringLiteral(" WHERE rowid='||OLD.rowid||';' "
-                 "WHERE ROWID=(SELECT MAX(ROWID) FROM " RESQUN_TBL_TEMP ");"
-             "END;");
+    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_u_") % s_column % QStringLiteral(" \n"
+             "AFTER UPDATE OF ") % s_column % QStringLiteral(" ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 \n"
+             "BEGIN UPDATE " RESQUN_TBL_TEMP " \n"
+                 "SET sql=sql || 'UPDATE ") % s_table % QStringLiteral(" SET ") % s_column % QStringLiteral(" WHERE rowid='||OLD.rowid||';' \n"
+                 "WHERE ROWID=(SELECT MAX(ROWID) FROM " RESQUN_TBL_TEMP ");\n"
+             "END;\n\n");
 }
 /* ========================================================================= */
 
@@ -224,23 +228,134 @@ QString ReSqliteUn::sqlUpdateTriggerPerColumn (
  * The point of this method is to create an sql statement like the following:
  *
  * @code
- * CREATE TEMP TRIGGER _u_Test_u
- *     AFTER UPDATE ON Test WHEN (SELECT undoable_active())=1
- *     BEGIN UPDATE _sqlite_undo
+ * CREATE TEMP TRIGGER resqun_Test_u
+ *     AFTER UPDATE ON Test WHEN (SELECT resqun_active())=1
+ *     BEGIN UPDATE resqun_sqlite_undo
  *         SET sql=sql || 'UPDATE Test SET data='||quote(OLD.data)||',data1='||quote(OLD.data1)||' WHERE rowid='||OLD.rowid||';'
- *         WHERE ROWID=(SELECT MAX(ROWID) FROM _sqlite_undo);
+ *         WHERE ROWID=(SELECT MAX(ROWID) FROM resqun_sqlite_undo);
  *     END;
  * @endcode
  *
  */
 QString ReSqliteUn::sqlUpdateTriggerPerTable (const QString &s_table, const QString & s_column_list)
 {
-    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_u "
-         "AFTER UPDATE ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 "
-         "BEGIN UPDATE " RESQUN_TBL_TEMP " "
-             "SET sql=sql || 'UPDATE ") % s_table % QStringLiteral(" SET ") % s_column_list % QStringLiteral(" WHERE rowid='||OLD.rowid||';' "
-             "WHERE ROWID=(SELECT MAX(ROWID) FROM " RESQUN_TBL_TEMP "); "
-         "END; ");
+    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_u \n"
+         "AFTER UPDATE ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 \n"
+         "BEGIN UPDATE " RESQUN_TBL_TEMP " \n"
+             "SET sql=sql || 'UPDATE ") % s_table % QStringLiteral(" SET ") % s_column_list % QStringLiteral(" WHERE rowid='||OLD.rowid||';' \n"
+             "WHERE ROWID=(SELECT MAX(ROWID) FROM " RESQUN_TBL_TEMP "); \n"
+         "END; \n\n");
+}
+/* ========================================================================= */
+
+
+/* ------------------------------------------------------------------------- */
+/**
+ * We discover the structure of the table by using PRAGMA table_info(Table);
+ * which returns one row per column with following columns:
+ *
+ *   0. cid - the id of the record;
+ *   1. name - the name of the column;
+ *   2. type - a string representing the type (INTEGER, TEXT, ...);
+ *   3. notnull - flag that tells us if NOT NULL constraint is active (1) or not (0);
+ *   4. dflt_value - default value for the column;
+ *   5. pk - flag that tells us if this is a primary key or not.
+ *
+ *
+ */
+QString ReSqliteUn::sqlTriggers (
+        const QString & table, UpdateBehaviour update_kind)
+{
+    sqlite3_stmt *stmt;
+
+    QString statement = QStringLiteral("PRAGMA table_info(") % table %
+            QStringLiteral(");\n");
+
+    int rc = sqlite3_prepare16 (
+                static_cast<sqlite3 *>(db_), statement.utf16 (),
+                statement.size () * sizeof(QChar), &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        return false;
+    }
+
+    QString del_col_name;
+    QString del_col_value;
+    QString upd_col_value;
+    QString upd_tbl_value;
+
+    enum TableInfoColumns {
+        col_cid = 0, // the id of the record;
+        col_name, // the name of the column;
+        col_type, // a string representing the type (INTEGER, TEXT, ...);
+        col_notnull, // flag that tells us if NOT NULL constraint is active (1) or not (0);
+        col_dflt_value, // default value for the column;
+        col_pk, // flag that tells us if this is a primary key or not.
+    };
+
+    bool b_ret = true;
+    for (;;) {
+        // Get next record.
+        rc = sqlite3_step (stmt);
+        if (rc == SQLITE_DONE) {
+            break;
+        } else if (rc != SQLITE_ROW) {
+            b_ret = false;
+            break;
+        }
+
+        bool is_primary = (sqlite3_column_int (stmt, col_pk) == 1);
+        QString name = QString (reinterpret_cast<const QChar *>(
+                    sqlite3_column_text16(stmt, col_name)),
+                    sqlite3_column_bytes16(stmt, col_name) / sizeof(QChar));
+
+        // This results in column1,column2,column3
+        if (!del_col_name.isEmpty ()) {
+            del_col_name.append (comma);
+        }
+        del_col_name.append (name);
+
+        // This results in column1,column2,column3
+//        del_col_value.append (comma);
+//        QString quoted_old_colum = QStringLiteral("'||quote(OLD.") % name %
+//                QStringLiteral(")||'");
+//        del_col_value.append (quoted_old_colum);
+
+        del_col_value.append (
+                    comma % QStringLiteral("'||quote(OLD.") % name %
+                    QStringLiteral(")||'"));
+
+        // Primary keys excluded from those that trigger an unco step.
+        if (is_primary)
+            continue;
+
+        switch (update_kind) {
+        case OneTriggerPerUpdatedColumn: {
+            upd_col_value.append (sqlUpdateTriggerPerColumn (table, name));
+            break; }
+        case OneTriggerPerUpdatedTable: {
+            if (!upd_tbl_value.isEmpty ()) {
+                upd_tbl_value.append (comma);
+            }
+            upd_tbl_value.append (
+                        name % QStringLiteral("='||quote(OLD.") % name %
+                        QStringLiteral(")||'"));
+            break; }
+        case NoTriggerForUpdate: {
+            break; }
+        }
+    }
+
+    if (rc == SQLITE_DONE) {
+        return
+            (update_kind == OneTriggerPerUpdatedTable ?
+                 sqlUpdateTriggerPerTable (table, upd_tbl_value) :
+                 empty) %
+            sqlDeleteTrigger (table, del_col_name, del_col_value) %
+            sqlInsertTrigger (table) %
+            upd_col_value;
+    } else {
+        return empty;
+    }
 }
 /* ========================================================================= */
 
@@ -249,18 +364,29 @@ QString ReSqliteUn::sqlUpdateTriggerPerTable (const QString &s_table, const QStr
  * We're adding a table to the list of tables managed by the
  * undo-redo mechanism.
  */
-bool ReSqliteUn::attachToTable (const QString & table, int)
+bool ReSqliteUn::attachToTable (
+        void * ctx, const QString & table, UpdateBehaviour update_kind)
 {
     RESQLITEUN_TRACE_ENTRY;
     bool b_ret = false;
     for (;;) {
+        sqlite3_context *context = static_cast<sqlite3_context *>(ctx);
+        QString statements = sqlTriggers (table, update_kind);
+        printf(statements.toLatin1().constData());
 
-
-
-
-
-
-
+        // This is inefficient as toUtf8 will allocate a new buffer;
+        // as sqlite3_exec only works with Utf8 (there is no 16 alternative)
+        // we are left with three options: use utf8 all over the place,
+        // the one below or reimplementing sqlite3_exec.
+        // As the this function will probably used only when the program starts,
+        // once for each table, the performance penality is neglijable.
+        int rc = sqlite3_exec (
+                    static_cast<sqlite3 *>(db_),
+                    statements.toUtf8().constData (),
+                    NULL, NULL, NULL);
+        if (rc != SQLITE_OK) {
+            sqlite3_result_error_code (context, rc);
+        }
 
         b_ret = true;
         break;

@@ -37,7 +37,6 @@ SQLITE_EXTENSION_INIT1
 //
 //
 /*  SQLITE Entry Points   -------------------------------------------------- */
-extern "C" {
 
 /* ------------------------------------------------------------------------- */
 //! Helper for retrieving strings from values.
@@ -48,6 +47,10 @@ static QString value2string (sqlite3_value * value)
                        sqlite3_value_bytes16 (value) / sizeof(QChar));
 }
 /* ========================================================================= */
+
+
+
+extern "C" {
 
 
 
@@ -78,6 +81,18 @@ static void epoint_table (
 
         // Check arguments values.
         int update_type = sqlite3_value_int(argv[1]);
+        if (
+                (update_type != ReSqliteUn::NoTriggerForUpdate) &&
+                (update_type != ReSqliteUn::OneTriggerPerUpdatedTable) &&
+                (update_type != ReSqliteUn::OneTriggerPerUpdatedColumn)) {
+
+            sqlite3_result_error (
+                        context,
+                        "Second argument to " RESQUN_FUN_TABLE
+                        " must be 0, 1 or 2", -1);
+            break;
+        }
+
         QString table = value2string(argv[0]);
         if (table.length() == 0) {
             sqlite3_result_error (
@@ -87,10 +102,13 @@ static void epoint_table (
             break;
         }
 
-        db = sqlite3_context_db_handle(context);
-        assert(db == p_app->db_);
+        sqlite3 * db = sqlite3_context_db_handle(context);
+        assert(db == static_cast<sqlite3 *>(p_app->db_));
 
-        if (!p_app->attachToTable (table, update_type)) {
+        if (!p_app->attachToTable (
+                    context, table,
+                    static_cast<ReSqliteUn::UpdateBehaviour>(update_type))) {
+
             sqlite3_result_error (context, RESQUN_FUN_TABLE "failed", -1);
             break;
         }
@@ -181,6 +199,13 @@ RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
         SQLITE_EXTENSION_INIT2(pApi);
 
         ReSqliteUn * p_app = new ReSqliteUn (static_cast<void*> (db));
+
+        rc = sqlite3_exec (db,
+            "CREATE TEMP TABLE " RESQUN_TBL_TEMP "(sql TEXT, status INTEGER)",
+            NULL, NULL, NULL);
+        if (rc != SQLITE_OK) {
+            return rc;
+        }
 
         rc = sqlite3_create_function_v2 (
                     db,

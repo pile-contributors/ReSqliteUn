@@ -284,15 +284,118 @@ static void epoint_end (
 }
 /* ========================================================================= */
 
+
+/* ------------------------------------------------------------------------- */
+//! Implementation of the `redo` and `undo` function.
+static void preform_ur (sqlite3_context *context, bool for_undo)
+{
+    int rc = SQLITE_OK;
+    bool rollback = false;
+
+    ReSqliteUn * p_app = static_cast<ReSqliteUn *>(
+                sqlite3_user_data (context));
+    assert(p_app != NULL);
+    sqlite3 * db = sqlite3_context_db_handle(context);
+    assert(db == static_cast<sqlite3 *>(p_app->db_));
+
+    for (;;) {
+
+        if (p_app->is_active_) {
+            sqlite3_result_error(
+                        context,
+                        "In an update (forgot to call " RESQUN_FUN_END "?)", -1);
+            rc = SQLITE_MISUSE;
+            break;
+        }
+
+        sqlite_int64 maxid;
+        rc = p_app->lastStepId (for_undo, maxid);
+        if (rc != SQLITE_OK) {
+            break;
+        }
+        if (maxid == 0) {
+            sqlite3_result_null (context);
+            break;
+        }
+
+        QString sql;
+        rc = p_app->getSqlStatementForId (maxid, sql);
+        if (rc != SQLITE_OK) {
+            break;
+        }
+
+        if (sql.isEmpty ()) {
+            sqlite3_result_null(context);
+            break;
+        }
+
+        rc = sqlite3_exec(db, "SAVEPOINT " RESQUN_SVP_UNDO,
+                NULL, NULL, NULL);
+        if (rc != SQLITE_OK) {
+            break;
+        }
+        rollback = true;
+
+        rc = p_app->deleteForId (maxid);
+        if (rc != SQLITE_OK) {
+            break;
+        }
+
+        rc = p_app->insertNew (!for_undo);
+        if (rc != SQLITE_OK) {
+            break;
+        }
+
+        p_app->is_active_ = true;
+        rc = sqlite3_exec (db, sql.toUtf8().constData(), NULL, NULL, NULL);
+        p_app->is_active_ = false;
+        if (rc != SQLITE_OK) {
+            break;
+        }
+
+        qint64 entries[2];
+        int rc = p_app->count (entries[0], entries[1]);
+        if (rc != SQLITE_OK) {
+            sqlite3_result_error(
+                        context,
+                        "Failed to retrieve values from temporary table",
+                        -1);
+            break;
+        }
+
+        sqlite3_result_blob(context, &entries, sizeof(entries), SQLITE_TRANSIENT);
+
+//        char *result;
+//        result = sqlite3_mprintf (
+//                    "UNDO=%lld\nREDO=%lld",
+//                    entries[0], entries[1]);
+//        sqlite3_result_text (context, result, -1, sqlite3_free);
+
+
+        rollback = false;
+        sqlite3_exec (db, "RELEASE SAVEPOINT " RESQUN_SVP_UNDO,
+            NULL, NULL, NULL);
+
+        break;
+    }
+    if (rollback) {
+        sqlite3_exec(db,
+            "ROLLBACK TO SAVEPOINT " RESQUN_SVP_UNDO ";"
+            "RELEASE SAVEPOINT " RESQUN_SVP_UNDO,
+            NULL, NULL, NULL);
+    }
+    if (rc != SQLITE_OK) {
+        sqlite3_result_error_code (context, rc);
+    }
+}
+/* ========================================================================= */
+
 /* ------------------------------------------------------------------------- */
 //! Implementation of the `undo` function.
 static void epoint_undo (
             sqlite3_context *context, int argc, sqlite3_value **argv)
 {
-    ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
-    assert(p_app != NULL);
-
-    p_app->attachToTable ();
+    preform_ur (context, true);
 }
 /* ========================================================================= */
 
@@ -301,10 +404,7 @@ static void epoint_undo (
 static void epoint_redo (
             sqlite3_context *context, int argc, sqlite3_value **argv)
 {
-    ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
-    assert(p_app != NULL);
-
-    p_app->attachToTable ();
+    preform_ur (context, false);
 }
 /* ========================================================================= */
 

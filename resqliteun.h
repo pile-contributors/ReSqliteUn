@@ -132,6 +132,8 @@ public:
                                              column of the table */
     };
 
+    typedef int SqLiteResult;
+
     /*  DEFINITIONS    ===================================================== */
     //
     //
@@ -150,7 +152,17 @@ public:
         a table to thelist monitored by this module. */
 
     static const char * s_sql_ur_count_; /**< sql statement for finding out
-                                              how many entries are in the table. */
+        how many entries are in the table. */
+    static const char * s_sql_u_maxid_; /**< sql statement for finding out
+        last id of the undo kind. */
+    static const char * s_sql_r_maxid_; /**< sql statement for finding out
+        last id of the redo kind. */
+
+    static const char * s_sql_u_ins_; /**< sql statement for inserting
+        a new entry of the undo kind. */
+    static const char * s_sql_r_ins_; /**< sql statement for inserting
+        a new entry of the redo kind. */
+
 
     static ReSqliteUn * instance_; /**< the one and only instance */
 
@@ -182,10 +194,37 @@ public:
             UpdateBehaviour update_kind);
 
     //! Get the number of entries in the temporary table by kind.
-    int
+    SqLiteResult
     count (
             qint64 & undo_entries,
-            qint64 & redo_entries);
+            qint64 & redo_entries) const;
+
+    //! Get the rowid of the last recorded undo or redo step.
+    SqLiteResult
+    lastStepId (
+            bool for_undo,
+            qint64 & result) const;
+
+    //! Read the sql statement from the temporary table.
+    SqLiteResult
+    getSqlStatementForId (
+            qint64 rowid,
+            QString &result) const;
+
+    //! Read the last sql statement from the temporary table.
+    SqLiteResult
+    getLastSqlStatement (
+            QString &result) const;
+
+    //! Delete a record from the temporary table.
+    SqLiteResult
+    deleteForId (
+            qint64 rowid) const;
+
+    //! Insert a new record.
+    SqLiteResult
+    insertNew (
+            bool for_undo) const;
 
 public:
 

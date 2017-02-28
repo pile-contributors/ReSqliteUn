@@ -37,6 +37,17 @@ const char * ReSqliteUn::s_sql_ur_count_ =
         "SELECT "
         "(SELECT COUNT(*) FROM " RESQUN_TBL_TEMP " WHERE status=" RESQUN_MARK_UNDO ") AS UNDO,"
         "(SELECT COUNT(*) FROM " RESQUN_TBL_TEMP " WHERE status=" RESQUN_MARK_REDO ") AS REDO;";
+const char * ReSqliteUn::s_sql_u_maxid_ =
+        "SELECT max(rowid) FROM " RESQUN_TBL_TEMP " WHERE status=" RESQUN_MARK_UNDO ";";
+const char * ReSqliteUn::s_sql_r_maxid_ =
+        "SELECT max(rowid) FROM " RESQUN_TBL_TEMP " WHERE status=" RESQUN_MARK_REDO ";";
+
+const char * ReSqliteUn::s_sql_u_ins_ =
+    "INSERT INTO " RESQUN_TBL_TEMP "(sql, status) VALUES(''," RESQUN_MARK_UNDO ")";
+const char * ReSqliteUn::s_sql_r_ins_ =
+    "INSERT INTO " RESQUN_TBL_TEMP "(sql, status) VALUES(''," RESQUN_MARK_REDO ")";
+
+
 
 ReSqliteUn * ReSqliteUn::instance_ = NULL;
 
@@ -171,8 +182,8 @@ QString ReSqliteUn::sqlDeleteTrigger (
     return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_d \n"
              "BEFORE DELETE ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 \n"
              "BEGIN UPDATE " RESQUN_TBL_TEMP " \n"
-                 "SET sql=sql ||'INSERT INTO ") % s_table % QStringLiteral("(rowid") % s_column_names % QStringLiteral(") "
-                        "VALUES('||OLD.rowid||',") % s_column_values % QStringLiteral(");' \n"
+                 "SET sql=sql ||'INSERT INTO ") % s_table % QStringLiteral("(rowid,") % s_column_names % QStringLiteral(") "
+                        "VALUES('||OLD.rowid||'") % s_column_values % QStringLiteral(");' \n"
                  "WHERE ROWID=(SELECT MAX(ROWID) FROM " RESQUN_TBL_TEMP "); \n"
              "END;\n\n");
 }
@@ -402,6 +413,177 @@ bool ReSqliteUn::attachToTable (
 /* ========================================================================= */
 
 /* ------------------------------------------------------------------------- */
+ReSqliteUn::SqLiteResult ReSqliteUn::lastStepId (
+        bool for_undo, qint64 &result) const
+{
+    ReSqliteUn::SqLiteResult rc = SQLITE_OK;
+    sqlite3_stmt *stmt = NULL;
+    for (;;) {
+        rc = sqlite3_prepare_v2 (
+                    static_cast<sqlite3 *>(db_),
+                    for_undo ? s_sql_u_maxid_ : s_sql_r_maxid_, -1,
+                    &stmt, NULL);
+        if (rc != SQLITE_OK) {
+
+            break;
+        }
+
+        rc = sqlite3_step (stmt);
+        if (rc != SQLITE_ROW) {
+
+            break;
+        }
+
+        result = sqlite3_column_int64 (stmt, 0);
+
+        rc = SQLITE_OK;
+        break;
+    }
+
+    if (stmt != NULL) {
+        sqlite3_finalize(stmt);
+    }
+    return rc;
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+ReSqliteUn::SqLiteResult ReSqliteUn::insertNew (
+        bool for_undo) const
+{
+    ReSqliteUn::SqLiteResult rc = SQLITE_OK;
+    sqlite3_stmt *stmt = NULL;
+    for (;;) {
+        rc = sqlite3_prepare_v2 (
+                    static_cast<sqlite3 *>(db_),
+                    for_undo ? s_sql_u_ins_ : s_sql_r_ins_, -1,
+                    &stmt, NULL);
+        if (rc != SQLITE_OK) {
+
+            break;
+        }
+
+        rc = sqlite3_step (stmt);
+        if (rc != SQLITE_DONE) {
+
+            break;
+        }
+
+        rc = SQLITE_OK;
+        break;
+    }
+
+    if (stmt != NULL) {
+        sqlite3_finalize(stmt);
+    }
+    return rc;
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+ReSqliteUn::SqLiteResult ReSqliteUn::getSqlStatementForId (
+        qint64 rowid, QString &result) const
+{
+    ReSqliteUn::SqLiteResult rc = SQLITE_OK;
+    sqlite3_stmt *stmt = NULL;
+    for (;;) {
+        rc = sqlite3_prepare_v2 (static_cast<sqlite3 *>(db_),
+                "SELECT sql FROM " RESQUN_TBL_TEMP " WHERE rowid=?",
+                -1, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+
+            break;
+        }
+        sqlite3_bind_int64 (stmt, 1, rowid);
+
+        rc = sqlite3_step (stmt);
+        if (rc != SQLITE_ROW) {
+
+            break;
+        }
+
+        result = columnText (stmt, 0);
+
+        rc = SQLITE_OK;
+        break;
+    }
+
+    if (stmt != NULL) {
+        sqlite3_finalize(stmt);
+    }
+    return rc;
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+ReSqliteUn::SqLiteResult ReSqliteUn::getLastSqlStatement (
+        QString &result) const
+{
+    ReSqliteUn::SqLiteResult rc = SQLITE_OK;
+    sqlite3_stmt *stmt = NULL;
+    for (;;) {
+        rc = sqlite3_prepare_v2 (static_cast<sqlite3 *>(db_),
+                "SELECT sql FROM " RESQUN_TBL_TEMP
+                " WHERE rowid=(SELECT max(rowid) FROM " RESQUN_TBL_TEMP ");",
+                -1, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+
+            break;
+        }
+
+        rc = sqlite3_step (stmt);
+        if (rc != SQLITE_ROW) {
+
+            break;
+        }
+
+        result = columnText (stmt, 0);
+
+        rc = SQLITE_OK;
+        break;
+    }
+
+    if (stmt != NULL) {
+        sqlite3_finalize(stmt);
+    }
+    return rc;
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+ReSqliteUn::SqLiteResult ReSqliteUn::deleteForId (
+        qint64 rowid) const
+{
+    ReSqliteUn::SqLiteResult rc = SQLITE_OK;
+    sqlite3_stmt *stmt = NULL;
+    for (;;) {
+        rc = sqlite3_prepare_v2 (static_cast<sqlite3 *>(db_),
+                "DELETE FROM " RESQUN_TBL_TEMP " WHERE rowid=?",
+                -1, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+
+            break;
+        }
+        sqlite3_bind_int64 (stmt, 1, rowid);
+
+        rc = sqlite3_step (stmt);
+        if (rc != SQLITE_DONE) {
+
+            break;
+        }
+
+        rc = SQLITE_OK;
+        break;
+    }
+
+    if (stmt != NULL) {
+        sqlite3_finalize(stmt);
+    }
+    return rc;
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
 /**
  * @warning The result is the error code (SQLITE_OK if all went well).
  *
@@ -409,9 +591,10 @@ bool ReSqliteUn::attachToTable (
  * @param redo_entries Resulted redo entries
  * @return error code
  */
-int ReSqliteUn::count (qint64 &undo_entries, qint64 &redo_entries)
+ReSqliteUn::SqLiteResult ReSqliteUn::count (
+        qint64 &undo_entries, qint64 &redo_entries) const
 {
-    int rc = SQLITE_OK;
+    ReSqliteUn::SqLiteResult rc = SQLITE_OK;
     sqlite3_stmt *stmt = NULL;
     for (;;) {
         int rc = sqlite3_prepare_v2 (

@@ -222,6 +222,14 @@ public:
     insertNew (
             bool for_undo) const;
 
+    //! Creates a restore point.
+    ReSqliteUn::SqLiteResult
+    begin ();
+
+    //! Closes a restore point.
+    ReSqliteUn::SqLiteResult
+    end ();
+
 public:
 
     //! The one and only instance.
@@ -238,6 +246,7 @@ public:
     columnText (
             void * statement,
             int column);
+
 
 protected:
 

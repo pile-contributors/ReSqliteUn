@@ -57,6 +57,8 @@ xEntryPoint getEntryPoint ();
 static QLatin1String comma (",");
 static QString empty;
 
+#define dtb_ static_cast<sqlite3 *>(db_)
+
 /*  DEFINITIONS    ========================================================= */
 //
 //
@@ -272,7 +274,7 @@ QString ReSqliteUn::sqlTriggers (
             QStringLiteral(");\n");
 
     int rc = sqlite3_prepare16 (
-                static_cast<sqlite3 *>(db_), statement.utf16 (),
+                dtb_, statement.utf16 (),
                 statement.size () * sizeof(QChar), &stmt, NULL);
     if (rc != SQLITE_OK) {
         return false;
@@ -381,7 +383,7 @@ bool ReSqliteUn::attachToTable (
         // As the this function will probably used only when the program starts,
         // once for each table, the performance penality is neglijable.
         int rc = sqlite3_exec (
-                    static_cast<sqlite3 *>(db_),
+                    dtb_,
                     statements.toUtf8().constData (),
                     NULL, NULL, NULL);
         if (rc != SQLITE_OK) {
@@ -404,7 +406,7 @@ ReSqliteUn::SqLiteResult ReSqliteUn::lastStepId (
     sqlite3_stmt *stmt = NULL;
     for (;;) {
         rc = sqlite3_prepare_v2 (
-                    static_cast<sqlite3 *>(db_),
+                    dtb_,
                     for_undo ? s_sql_u_maxid_ : s_sql_r_maxid_, -1,
                     &stmt, NULL);
         if (rc != SQLITE_OK) {
@@ -439,7 +441,7 @@ ReSqliteUn::SqLiteResult ReSqliteUn::insertNew (
     sqlite3_stmt *stmt = NULL;
     for (;;) {
         rc = sqlite3_prepare_v2 (
-                    static_cast<sqlite3 *>(db_),
+                    dtb_,
                     for_undo ? s_sql_u_ins_ : s_sql_r_ins_, -1,
                     &stmt, NULL);
         if (rc != SQLITE_OK) {
@@ -471,7 +473,7 @@ ReSqliteUn::SqLiteResult ReSqliteUn::getSqlStatementForId (
     ReSqliteUn::SqLiteResult rc = SQLITE_OK;
     sqlite3_stmt *stmt = NULL;
     for (;;) {
-        rc = sqlite3_prepare_v2 (static_cast<sqlite3 *>(db_),
+        rc = sqlite3_prepare_v2 (dtb_,
                 "SELECT sql FROM " RESQUN_TBL_TEMP " WHERE rowid=?",
                 -1, &stmt, NULL);
         if (rc != SQLITE_OK) {
@@ -506,7 +508,7 @@ ReSqliteUn::SqLiteResult ReSqliteUn::getLastSqlStatement (
     ReSqliteUn::SqLiteResult rc = SQLITE_OK;
     sqlite3_stmt *stmt = NULL;
     for (;;) {
-        rc = sqlite3_prepare_v2 (static_cast<sqlite3 *>(db_),
+        rc = sqlite3_prepare_v2 (dtb_,
                 "SELECT sql FROM " RESQUN_TBL_TEMP
                 " WHERE rowid=(SELECT max(rowid) FROM " RESQUN_TBL_TEMP ");",
                 -1, &stmt, NULL);
@@ -541,7 +543,7 @@ ReSqliteUn::SqLiteResult ReSqliteUn::deleteForId (
     ReSqliteUn::SqLiteResult rc = SQLITE_OK;
     sqlite3_stmt *stmt = NULL;
     for (;;) {
-        rc = sqlite3_prepare_v2 (static_cast<sqlite3 *>(db_),
+        rc = sqlite3_prepare_v2 (dtb_,
                 "DELETE FROM " RESQUN_TBL_TEMP " WHERE rowid=?",
                 -1, &stmt, NULL);
         if (rc != SQLITE_OK) {
@@ -581,8 +583,8 @@ ReSqliteUn::SqLiteResult ReSqliteUn::count (
     ReSqliteUn::SqLiteResult rc = SQLITE_OK;
     sqlite3_stmt *stmt = NULL;
     for (;;) {
-        int rc = sqlite3_prepare_v2 (
-                    static_cast<sqlite3 *>(db_),
+        rc = sqlite3_prepare_v2 (
+                    dtb_,
                     s_sql_ur_count_, -1, &stmt, NULL);
         if (rc != SQLITE_OK) {
 
@@ -608,6 +610,67 @@ ReSqliteUn::SqLiteResult ReSqliteUn::count (
     return rc;
 }
 /* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+/**
+ *
+ * @return error code
+ */
+ReSqliteUn::SqLiteResult ReSqliteUn::begin ()
+{
+    ReSqliteUn::SqLiteResult rc = SQLITE_ERROR;
+    for (;;) {
+
+        if (is_active_) {
+            rc = SQLITE_MISUSE;
+            break;
+        }
+
+        // Remove all "redo" entries and place a marker for first undo entry.
+        rc = sqlite3_exec(
+            dtb_,
+            "SAVEPOINT " RESQUN_SVP_BEGIN ";"
+            "DELETE FROM " RESQUN_TBL_TEMP " WHERE status=" RESQUN_MARK_REDO ";"
+            "INSERT INTO " RESQUN_TBL_TEMP "(sql, status) VALUES(''," RESQUN_MARK_UNDO ");",
+            NULL, NULL, NULL);
+        if (rc != SQLITE_OK) {
+            sqlite3_exec (dtb_,
+                "ROLLBACK TO SAVEPOINT " RESQUN_SVP_BEGIN,
+                NULL, NULL, NULL);
+        } else {
+            is_active_ = true;
+        }
+        sqlite3_exec (dtb_, "RELEASE SAVEPOINT " RESQUN_SVP_BEGIN,
+                NULL, NULL, NULL);
+
+        rc = SQLITE_OK;
+        break;
+    }
+    return rc;
+}
+/* ------------------------------------------------------------------------- */
+
+/* ========================================================================= */
+ReSqliteUn::SqLiteResult ReSqliteUn::end ()
+{
+    ReSqliteUn::SqLiteResult rc = SQLITE_ERROR;
+    for (;;) {
+
+        if (!is_active_) {
+            rc = SQLITE_MISUSE;
+            break;
+        }
+
+        is_active_ = false;
+
+        rc = SQLITE_OK;
+        break;
+    }
+    return rc;
+}
+/* ========================================================================= */
+
+
 
 /* ------------------------------------------------------------------------- */
 bool ReSqliteUn::autoregister ()

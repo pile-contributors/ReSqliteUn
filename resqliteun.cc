@@ -153,23 +153,11 @@ static void epoint_begin (
         sqlite3 * db = sqlite3_context_db_handle(context);
         assert(db == static_cast<sqlite3 *>(p_app->db_));
 
-        // Remove all "redo" entries and place a marker for first undo entry.
-        int rc = sqlite3_exec(
-            db,
-            "SAVEPOINT " RESQUN_SVP_BEGIN ";"
-            "DELETE FROM " RESQUN_TBL_TEMP " WHERE status=" RESQUN_MARK_REDO ";"
-            "INSERT INTO " RESQUN_TBL_TEMP "(sql, status) VALUES(''," RESQUN_MARK_UNDO ");",
-            NULL, NULL, NULL);
+        ReSqliteUn::SqLiteResult rc = p_app->begin ();
         if (rc != SQLITE_OK) {
-            sqlite3_exec (db,
-                "ROLLBACK TO SAVEPOINT " RESQUN_SVP_BEGIN,
-                NULL, NULL, NULL);
             sqlite3_result_error_code (context, rc);
-        } else {
-            p_app->is_active_ = true;
+            break;
         }
-        sqlite3_exec (db,"RELEASE SAVEPOINT " RESQUN_SVP_BEGIN,
-                NULL, NULL, NULL);
 
         break;
     }
@@ -180,8 +168,8 @@ static void epoint_begin (
 //! Implementation of the `end` function.
 #define STR_END_USAGE \
             "0 (for no output), "\
-            "1 (to return the number of undo enttries as an integer), "\
-            "2 (to return the number of redo enttries as an integer), "\
+            "1 (to return the number of undo entries as an integer), "\
+            "2 (to return the number of redo entries as an integer), "\
             "3 (to return an array as a blob with undo and redo count), "\
             "or 4 (to print the undo and redo as text"
 static void epoint_end (
@@ -201,7 +189,8 @@ static void epoint_end (
                 static_cast<ReSqliteUn *>(sqlite3_user_data (context));
         assert(p_app != NULL);
 
-        if (!p_app->is_active_) {
+        int rc = p_app->end ();
+        if (rc != SQLITE_OK) {
             sqlite3_result_error(context, "Not in an update", -1);
             break;
         }
@@ -210,7 +199,7 @@ static void epoint_end (
         assert(db == static_cast<sqlite3 *>(p_app->db_));
 
         qint64 entries[2];
-        int rc = p_app->count (entries[0], entries[1]);
+        rc = p_app->count (entries[0], entries[1]);
         if (rc != SQLITE_OK) {
             sqlite3_result_error(
                         context,

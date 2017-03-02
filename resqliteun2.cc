@@ -79,7 +79,8 @@ static QString empty;
 
 /* ------------------------------------------------------------------------- */
 /**
- * Detailed description for constructor.
+ * Marks itself as the default instance (this is the instance that is returned,
+ * odly enough, by the instance() method).
  */
 ReSqliteUn::ReSqliteUn (
         void *db) :
@@ -87,40 +88,23 @@ ReSqliteUn::ReSqliteUn (
     is_active_ (false)
 {
     RESQLITEUN_TRACE_ENTRY;
-
+    instance_ = this;
     RESQLITEUN_TRACE_EXIT;
 }
 /* ========================================================================= */
 
 /* ------------------------------------------------------------------------- */
 /**
- * Detailed description for destructor.
+ * If this is the default (last created) instnce then it will be no
+ * default instance from this point forward..
  */
 ReSqliteUn::~ReSqliteUn()
 {
     RESQLITEUN_TRACE_ENTRY;
-
-    RESQLITEUN_TRACE_EXIT;
-}
-/* ========================================================================= */
-
-/* ------------------------------------------------------------------------- */
-/**
- * Detailed description for destructor.
- */
-bool ReSqliteUn::attachToTable ()
-{
-    RESQLITEUN_TRACE_ENTRY;
-    bool b_ret = false;
-    for (;;) {
-
-
-
-        b_ret = true;
-        break;
+    if (instance_ == this) {
+        instance_ = NULL;
     }
     RESQLITEUN_TRACE_EXIT;
-    return b_ret;
 }
 /* ========================================================================= */
 

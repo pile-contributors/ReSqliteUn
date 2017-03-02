@@ -182,10 +182,6 @@ public:
     //! Destructor.
     virtual ~ReSqliteUn();
 
-
-    bool
-    attachToTable();
-
     //! Prepare the database to track this table.
     bool
     attachToTable (

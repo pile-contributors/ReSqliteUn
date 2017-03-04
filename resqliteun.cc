@@ -99,7 +99,7 @@ ReSqliteUn::~ReSqliteUn()
  * @return error code
  */
 ReSqliteUn::SqLiteResult ReSqliteUn::begin (
-        const QString & s_name)
+        const QString & s_name, qint64 * entry_id)
 {
     ReSqliteUn::SqLiteResult rc = SQLITE_ERROR;
     for (;;) {
@@ -136,6 +136,10 @@ ReSqliteUn::SqLiteResult ReSqliteUn::begin (
         } else {
             is_active_ = true;
             rc = SQLITE_OK;
+
+            if (entry_id != NULL) {
+                *entry_id = sqlite3_last_insert_rowid (dtb_);
+            }
         }
         sqlite3_exec (dtb_, "RELEASE SAVEPOINT " RESQUN_SVP_BEGIN,
                 NULL, NULL, NULL);

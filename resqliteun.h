@@ -81,7 +81,8 @@ public:
     //! Creates a restore point.
     ReSqliteUn::SqLiteResult
     begin (
-            const QString &s_name);
+            const QString &s_name,
+            qint64 * entry_id=NULL);
 
     //! Closes a restore point.
     ReSqliteUn::SqLiteResult

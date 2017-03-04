@@ -69,14 +69,18 @@ static void epoint_table (
 
         // Check arguments types.
         if ((sqlite3_value_type(argv[0]) != SQLITE_TEXT)) {
-            sqlite3_result_error (context,
-                                  "First argument to " RESQUN_FUN_TABLE " must be a sting", -1);
+            sqlite3_result_error (
+                        context,
+                        "First argument to " RESQUN_FUN_TABLE
+                        " must be a sting", -1);
             sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
             break;
         }
         if ((sqlite3_value_type(argv[1]) != SQLITE_INTEGER)) {
-            sqlite3_result_error (context,
-                                  "Second argument to " RESQUN_FUN_TABLE " must be an integer", -1);
+            sqlite3_result_error (
+                        context,
+                        "Second argument to " RESQUN_FUN_TABLE
+                        " must be an integer", -1);
             sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
             return;
         }
@@ -354,7 +358,7 @@ static void preform_ur (sqlite3_context *context, bool for_undo)
         }
 
         qint64 entries[2];
-        int rc = p_app->count (entries[0], entries[1]);
+        rc = p_app->count (entries[0], entries[1]);
         if (rc != SQLITE_OK) {
             sqlite3_result_error(
                         context,
@@ -440,10 +444,15 @@ RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, "
                 "sql TEXT, "
                 "status INTEGER, "
+                "idxid INTEGER, "
                 "FOREIGN KEY(idxid) REFERENCES " RESQUN_TBL_IDX "(id) "
             ");",
             NULL, NULL, NULL);
         if (rc != SQLITE_OK) {
+            *pzErrMsg = sqlite3_mprintf (
+                        "Failed to create temporary tables in ReSqliteUn `"
+                        RESQUN_FUN_TABLE "`: %s\n",
+                        sqlite3_errmsg(db));
             return rc;
         }
 

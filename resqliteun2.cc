@@ -374,7 +374,7 @@ bool ReSqliteUn::attachToTable (
     for (;;) {
         sqlite3_context *context = static_cast<sqlite3_context *>(ctx);
         QString statements = sqlTriggers (table, update_kind);
-        printf(statements.toLatin1().constData());
+        // printf(statements.toLatin1().constData());
 
         // This is inefficient as toUtf8 will allocate a new buffer;
         // as sqlite3_exec only works with Utf8 (there is no 16 alternative)
@@ -485,7 +485,7 @@ ReSqliteUn::SqLiteResult ReSqliteUn::getSqlStatementForId (
     sqlite3_stmt *stmt = NULL;
     for (;;) {
         rc = sqlite3_prepare_v2 (dtb_,
-                "SELECT sql FROM " RESQUN_TBL_TEMP " WHERE rowid=?",
+                "SELECT sql FROM " RESQUN_TBL_TEMP " WHERE rowid=?;",
                 -1, &stmt, NULL);
         if (rc != SQLITE_OK) {
 

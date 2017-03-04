@@ -44,14 +44,74 @@ each database. Last instance that was created is available through
 ReSqliteUn::instance() and to find the instance for a particular
 `sqlite3 *` pointer use ReSqliteUn::instanceForDatabase().
 
-
-
-
 Implementation
 --------------
 
-In order for the
+For each database the library creates two temporary table:
+- one that holds undo-redo entries and
+- another that stores the data for each individual entry
 
+Next, for each table that is explicitly requested by using
+`resqun_table` with the name of the table as argument the library
+will create a set of callbacks that are fired when entries are
+inserted, deleted or updated. However, callbck will not be fired
+if the ReSqliteUn instance is not in the active state
+(`resqun_active` returns 1 if it is and 0 if it isn't).
+
+To create an undo entry one calls the `resqun_begin` that puts the
+ReSqliteUn instance associated with that database into active state.
+`resqun_begin` needs an argument that will be used as the string
+representation of the action that is being performed. `resqun_begin`
+creates an undo entry in the `resqun_sqlite_itbl` table where it
+stores the name that was provided. All changes that occur from
+this point on will be associated with this entry.
+
+Next, for all statements that are being issued an undo statement is computed
+that is recorded in `resqun_sqlite_undo`. This goes on until
+until `resqun_end` is called which puts the
+ReSqliteUn instance associated with that database into inactive state.
+
+At this point the user may start another `resqun_begin` or it may issue
+`resqun_undo` command. This command converts the last undo entry into a
+redo entry and runs the statements associated with the
+last undo entry in reverse order, creating an redo entry for each.
+
+Here is a description of what goes on inside the table:
+
+        | (stack is empty)
+    resqun_begin("Entry 1"); some statements; resqun_end()
+        | Entry 1 - type U
+    resqun_begin("Entry 2"); some statements; resqun_end()
+        | Entry 1 - type U
+        | Entry 2 - type U
+    resqun_begin("Entry 3"); some statements; resqun_end()
+        | Entry 1 - type U
+        | Entry 2 - type U
+        | Entry 3 - type U
+
+    resqun_undo()
+        | Entry 1 - type U
+        | Entry 2 - type U
+        | Entry 3 - type R
+
+    resqun_undo()
+        | Entry 1 - type U
+        | Entry 2 - type R
+        | Entry 3 - type R
+
+    resqun_undo()
+        | Entry 1 - type R
+        | Entry 2 - type R
+        | Entry 3 - type R
+
+    resqun_redo()
+        | Entry 1 - type U
+        | Entry 2 - type R
+        | Entry 3 - type R
+
+    resqun_begin("Deal Breaker"); some statements; resqun_end()
+        | Entry 1 - type U
+        | Deal Breaker - type U
 
 
 [1]: https://sourceforge.net/projects/sqlite-undo

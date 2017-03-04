@@ -68,9 +68,14 @@ macro    (resqliteunInit
 
     # compose the list of headers and sources
     set(RESQLITEUN_HEADERS
+        "resqliteun-names.h"
+        "resqliteun-manager.h"
+        "resqliteun-util.h"
         "resqliteun.h")
     set(RESQLITEUN_SOURCES
-        "resqliteun2.cc"
+        "resqliteun-entry-points.cc"
+        "resqliteun-manager.cc"
+        "resqliteun-util.cc"
         "resqliteun.cc")
 
     pileSetSources(

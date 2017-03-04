@@ -16,13 +16,13 @@
 //
 /*  INCLUDES    ------------------------------------------------------------ */
 
-#include <sqlite/sqlite3ext.h>
-SQLITE_EXTENSION_INIT1
+#include <sqlite/sqlite3.h>
 
 #include "resqliteun.h"
 #include "resqliteun-private.h"
 
 #include <assert.h>
+#include <QStringBuilder>
 
 /*  INCLUDES    ============================================================ */
 //
@@ -31,552 +31,515 @@ SQLITE_EXTENSION_INIT1
 //
 /*  DEFINITIONS    --------------------------------------------------------- */
 
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
+
+#define dtb_ static_cast<sqlite3 *>(db_)
+
 /*  DEFINITIONS    ========================================================= */
 //
 //
 //
 //
-/*  SQLITE Entry Points   -------------------------------------------------- */
+/*  CLASS    --------------------------------------------------------------- */
+
+
+/**
+ * @class ReSqliteUn
+ *
+ * The class contains the implementation for the undo-redo plugin for
+ * sqlite. One of these instances will be attached to each database.
+ *
+ * The plugin will attach an instance of the ReSqliteUn class to each
+ * function but only the `table` function will delete this pointer. Given that
+ * sqlite calls the `destroy` function if the `table` function is overloaded
+ * (and when the database connection is closed) the end result is that our
+ * `table` function can NOT be overloaded.
+ *
+ */
 
 /* ------------------------------------------------------------------------- */
-//! Helper for retrieving strings from values.
-static QString value2string (sqlite3_value * value)
-{
-    return QString(reinterpret_cast<const QChar *>(
-                       sqlite3_value_text16 (value)),
-                       sqlite3_value_bytes16 (value) / sizeof(QChar));
-}
-/* ========================================================================= */
-
-
-
-extern "C" {
-
-
-
-/* ------------------------------------------------------------------------- */
-//! Implementation of the `table` function.
-static void epoint_table (
-            sqlite3_context *context, int argc, sqlite3_value **argv)
+/**
+ * Marks itself as the default instance (this is the instance that is returned,
+ * odly enough, by the instance() method).
+ */
+ReSqliteUn::ReSqliteUn (
+        void *db) :
+    db_ (db),
+    is_active_ (false),
+    in_undo_(true)
 {
     RESQLITEUN_TRACE_ENTRY;
-    bool b_ret = false;
-    for (;;) {
-
-        ReSqliteUn * p_app = static_cast<ReSqliteUn *>(
-                    sqlite3_user_data (context));
-        assert(p_app != NULL);
-
-        // Check arguments types.
-        if ((sqlite3_value_type(argv[0]) != SQLITE_TEXT)) {
-            sqlite3_result_error (
-                        context,
-                        "First argument to " RESQUN_FUN_TABLE
-                        " must be a sting", -1);
-            sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
-            break;
-        }
-        if ((sqlite3_value_type(argv[1]) != SQLITE_INTEGER)) {
-            sqlite3_result_error (
-                        context,
-                        "Second argument to " RESQUN_FUN_TABLE
-                        " must be an integer", -1);
-            sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
-            return;
-        }
-
-        // Check arguments values.
-        int update_type = sqlite3_value_int(argv[1]);
-        if (
-                (update_type != ReSqliteUn::NoTriggerForUpdate) &&
-                (update_type != ReSqliteUn::OneTriggerPerUpdatedTable) &&
-                (update_type != ReSqliteUn::OneTriggerPerUpdatedColumn)) {
-
-            sqlite3_result_error (
-                        context,
-                        "Second argument to " RESQUN_FUN_TABLE
-                        " must be 0, 1 or 2", -1);
-            sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
-            break;
-        }
-
-        QString table = value2string(argv[0]);
-        if (table.length() == 0) {
-            sqlite3_result_error (
-                        context,
-                        "First argument to " RESQUN_FUN_TABLE
-                        " must be a non-empty string", -1);
-            sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
-            break;
-        }
-
-        sqlite3 * db = sqlite3_context_db_handle(context);
-        assert(db == static_cast<sqlite3 *>(p_app->db_));
-
-        if (!p_app->attachToTable (
-                    context, table,
-                    static_cast<ReSqliteUn::UpdateBehaviour>(update_type))) {
-
-            sqlite3_result_error (context, RESQUN_FUN_TABLE "failed", -1);
-            break;
-        }
-
-        b_ret = true;
-        break;
-    }
+    instances_.append (this);
     RESQLITEUN_TRACE_EXIT;
 }
 /* ========================================================================= */
 
 /* ------------------------------------------------------------------------- */
-//! Implementation of the `active` function.
-static void epoint_active (
-            sqlite3_context *context, int argc, sqlite3_value **argv)
+/**
+ * If this is the default (last created) instnce then it will be no
+ * default instance from this point forward..
+ */
+ReSqliteUn::~ReSqliteUn()
 {
-    ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
-    assert(p_app != NULL);
-
-    sqlite3_result_int (context, p_app->is_active_);
+    RESQLITEUN_TRACE_ENTRY;
+    instances_.removeOne (this);
+    RESQLITEUN_TRACE_EXIT;
 }
 /* ========================================================================= */
 
 /* ------------------------------------------------------------------------- */
-//! Implementation of the `begin` function.
-static void epoint_begin (
-            sqlite3_context *context, int argc, sqlite3_value **argv)
+/**
+ * This entry creates a new entry in the index table and removes all "redo"
+ * entries that might exist with all their associated data.
+ *
+ * The instance is put on active state and will record future events.
+ *
+ * @param s_name The name to be inserted in the index table.
+ * @return error code
+ */
+ReSqliteUn::SqLiteResult ReSqliteUn::begin (
+        const QString & s_name)
 {
-    for (;;) {
-        QString name;
-        if (argc > 1) {
-            sqlite3_result_error (
-                        context,
-                        RESQUN_FUN_BEGIN " takes zero or one argument", -1);
-            sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
-            return;
-        } else if (argc == 1) {
-            name = value2string (argv[1]);
-        }
-
-        ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
-        assert(p_app != NULL);
-
-        if (p_app->is_active_) {
-            sqlite3_result_error(context, "Already in an update", -1);
-            break;
-        }
-
-        sqlite3 * db = sqlite3_context_db_handle(context);
-        assert(db == static_cast<sqlite3 *>(p_app->db_));
-
-        ReSqliteUn::SqLiteResult rc = p_app->begin (name);
-        if (rc != SQLITE_OK) {
-            sqlite3_result_error_code (context, rc);
-            break;
-        }
-
-        break;
-    }
-}
-/* ========================================================================= */
-
-/* ------------------------------------------------------------------------- */
-//! Implementation of the `end` function.
-#define STR_END_USAGE \
-            "0 (for no output), "\
-            "1 (to return the number of undo entries as an integer), "\
-            "2 (to return the number of redo entries as an integer), "\
-            "3 (to return an array as a blob with undo and redo count), "\
-            "or 4 (to print the undo and redo as text"
-static void epoint_end (
-            sqlite3_context *context, int argc, sqlite3_value **argv)
-{
-    sqlite3_stmt *stmt = NULL;
-    for (;;) {
-        if (argc > 1) {
-            sqlite3_result_error (
-                        context,
-                        RESQUN_FUN_END " takes zero or one argument", -1);
-            sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
-            return;
-        }
-
-        ReSqliteUn * p_app =
-                static_cast<ReSqliteUn *>(sqlite3_user_data (context));
-        assert(p_app != NULL);
-
-        int rc = p_app->end ();
-        if (rc != SQLITE_OK) {
-            sqlite3_result_error(context, "Not in an update", -1);
-            break;
-        }
-
-        sqlite3 * db = sqlite3_context_db_handle(context);
-        assert(db == static_cast<sqlite3 *>(p_app->db_));
-
-        qint64 entries[2];
-        rc = p_app->count (entries[0], entries[1]);
-        if (rc != SQLITE_OK) {
-            sqlite3_result_error(
-                        context,
-                        "Failed to retrieve values from temporary table",
-                        -1);
-            sqlite3_result_error_code (context, rc);
-            break;
-        }
-
-
-        enum EndOutputType {
-            NoOutput = 0,
-            UndoCountAsInt = 1,
-            RedoCountAsInt = 2,
-            BothAs64bitArray = 3,
-            BothAsText = 4,
-
-            EndOutputTypeMax
-        };
-        EndOutputType ty = BothAsText;
-
-        if (argc > 0) {
-            if ((sqlite3_value_type(argv[1]) != SQLITE_INTEGER)) {
-                sqlite3_result_error (context,
-                                      "First argument to " RESQUN_FUN_END
-                                      " must be an integer "
-                                      STR_END_USAGE, -1);
-                sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
-                return;
-            }
-            EndOutputType ty = static_cast<EndOutputType>(
-                        sqlite3_value_int(argv[1]));
-            if ((ty < 0) || (ty >= EndOutputTypeMax)) {
-                sqlite3_result_error (context,
-                                      "First argument to " RESQUN_FUN_END " must be "
-                                      STR_END_USAGE, -1);
-                sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
-                return;
-            }
-
-        }
-
-        switch (ty) {
-        case NoOutput: {
-            break; }
-        case UndoCountAsInt: {
-            sqlite3_result_int64 (context, entries[0]);
-            break; }
-        case RedoCountAsInt: {
-            sqlite3_result_int64 (context, entries[1]);
-            break; }
-        case BothAs64bitArray: {
-            sqlite3_result_blob(context, &entries, sizeof(entries), SQLITE_TRANSIENT);
-            break; }
-        case BothAsText: {
-            char *result;
-            result = sqlite3_mprintf (
-                        "UNDO=%lld\nREDO=%lld",
-                        entries[0], entries[1]);
-            sqlite3_result_text (context, result, -1, sqlite3_free);
-            break; }
-        }
-
-        p_app->is_active_ = false;
-        break;
-    }
-
-    if (stmt != NULL) {
-        sqlite3_finalize(stmt);
-    }
-}
-/* ========================================================================= */
-
-
-/* ------------------------------------------------------------------------- */
-//! Implementation of the `redo` and `undo` function.
-static void preform_ur (sqlite3_context *context, bool for_undo)
-{
-    int rc = SQLITE_OK;
-    bool rollback = false;
-
-    ReSqliteUn * p_app = static_cast<ReSqliteUn *>(
-                sqlite3_user_data (context));
-    assert(p_app != NULL);
-    sqlite3 * db = sqlite3_context_db_handle(context);
-    assert(db == static_cast<sqlite3 *>(p_app->db_));
-
+    ReSqliteUn::SqLiteResult rc = SQLITE_ERROR;
     for (;;) {
 
-        if (p_app->is_active_) {
-            sqlite3_result_error(
-                        context,
-                        "In an update (forgot to call " RESQUN_FUN_END "?)", -1);
+        if (is_active_) {
             rc = SQLITE_MISUSE;
             break;
         }
 
-        sqlite_int64 maxid;
-        rc = p_app->lastStepId (for_undo, maxid);
+        // Remove all "redo" entries and place a marker for first undo entry.
+        QString statements = QString (
+            "SAVEPOINT " RESQUN_SVP_BEGIN ";"
+
+            // we're removing all data entries that belong to redo entries
+            "DELETE FROM " RESQUN_TBL_TEMP " WHERE idxid IN ("
+                "SELECT id FROM " RESQUN_TBL_IDX
+                    " WHERE status=" STR(RESQUN_MARK_REDO) ");"
+
+            // Then  we remove all redo entries.
+            "DELETE FROM " RESQUN_TBL_IDX " WHERE status=" STR(RESQUN_MARK_REDO) ";"
+
+            // And we're inserting a new undo entry.
+            "INSERT INTO " RESQUN_TBL_IDX "(name, status) VALUES('%1'," STR(RESQUN_MARK_UNDO) ");"
+            ).arg (s_name);
+        rc = sqlite3_exec (
+            dtb_,
+            statements.toUtf8().constData (),
+            NULL, NULL, NULL);
         if (rc != SQLITE_OK) {
-            break;
-        }
-        if (maxid == 0) {
-            sqlite3_result_null (context);
-            break;
-        }
-
-        QString sql;
-        rc = p_app->getSqlStatementForId (maxid, sql);
-        if (rc != SQLITE_OK) {
-            break;
-        }
-
-        if (sql.isEmpty ()) {
-            sqlite3_result_null(context);
-            break;
-        }
-
-        rc = sqlite3_exec(db, "SAVEPOINT " RESQUN_SVP_UNDO,
+            sqlite3_exec (dtb_,
+                "ROLLBACK TO SAVEPOINT " RESQUN_SVP_BEGIN,
                 NULL, NULL, NULL);
-        if (rc != SQLITE_OK) {
-            break;
+            rc = SQLITE_ERROR;
+        } else {
+            is_active_ = true;
+            rc = SQLITE_OK;
         }
-        rollback = true;
+        sqlite3_exec (dtb_, "RELEASE SAVEPOINT " RESQUN_SVP_BEGIN,
+                NULL, NULL, NULL);
 
-        rc = p_app->deleteForId (maxid);
-        if (rc != SQLITE_OK) {
-            break;
-        }
-
-        rc = p_app->insertNew (!for_undo);
-        if (rc != SQLITE_OK) {
-            break;
-        }
-
-        p_app->is_active_ = true;
-        rc = sqlite3_exec (db, sql.toUtf8().constData(), NULL, NULL, NULL);
-        p_app->is_active_ = false;
-        if (rc != SQLITE_OK) {
-            break;
-        }
-
-        qint64 entries[2];
-        rc = p_app->count (entries[0], entries[1]);
-        if (rc != SQLITE_OK) {
-            sqlite3_result_error(
-                        context,
-                        "Failed to retrieve values from temporary table",
-                        -1);
-            break;
-        }
-
-        sqlite3_result_blob(context, &entries, sizeof(entries), SQLITE_TRANSIENT);
-
-//        char *result;
-//        result = sqlite3_mprintf (
-//                    "UNDO=%lld\nREDO=%lld",
-//                    entries[0], entries[1]);
-//        sqlite3_result_text (context, result, -1, sqlite3_free);
-
-
-        rollback = false;
-        sqlite3_exec (db, "RELEASE SAVEPOINT " RESQUN_SVP_UNDO,
-            NULL, NULL, NULL);
-
-        break;
-    }
-    if (rollback) {
-        sqlite3_exec(db,
-            "ROLLBACK TO SAVEPOINT " RESQUN_SVP_UNDO ";"
-            "RELEASE SAVEPOINT " RESQUN_SVP_UNDO,
-            NULL, NULL, NULL);
-    }
-    if (rc != SQLITE_OK) {
-        sqlite3_result_error_code (context, rc);
-    }
-}
-/* ========================================================================= */
-
-/* ------------------------------------------------------------------------- */
-//! Implementation of the `undo` function.
-static void epoint_undo (
-            sqlite3_context *context, int argc, sqlite3_value **argv)
-{
-    preform_ur (context, true);
-}
-/* ========================================================================= */
-
-/* ------------------------------------------------------------------------- */
-//! Implementation of the `redo` function.
-static void epoint_redo (
-            sqlite3_context *context, int argc, sqlite3_value **argv)
-{
-    preform_ur (context, false);
-}
-/* ========================================================================= */
-
-/* ------------------------------------------------------------------------- */
-//! Implementation of the application's `destroy` function.
-static void epoint_destroy (void *value)
-{
-    ReSqliteUn * p_app = static_cast<ReSqliteUn *>(value);
-    delete p_app;
-}
-/* ========================================================================= */
-
-/* ------------------------------------------------------------------------- */
-//! The entry point used by sqlite.
-RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
-            sqlite3 *db, char **pzErrMsg, const sqlite3_api_routines *pApi)
-{
-    int rc = SQLITE_OK;
-    for (;;) {
-        SQLITE_EXTENSION_INIT2(pApi);
-
-        ReSqliteUn * p_app = new ReSqliteUn (static_cast<void*> (db));
-
-        // AUTOINCREMENT is justified because we use the indices to
-        // have the entries sorted by time.
-        rc = sqlite3_exec (db,
-            "CREATE TEMP TABLE IF NOT EXISTS " RESQUN_TBL_IDX "("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                "name TEXT, "
-                "status INTEGER "
-            ");"
-            "CREATE TEMP TABLE IF NOT EXISTS " RESQUN_TBL_TEMP "("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                "sql TEXT, "
-                "status INTEGER, "
-                "idxid INTEGER, "
-                "FOREIGN KEY(idxid) REFERENCES " RESQUN_TBL_IDX "(id) "
-            ");",
-            NULL, NULL, NULL);
-        if (rc != SQLITE_OK) {
-            *pzErrMsg = sqlite3_mprintf (
-                        "Failed to create temporary tables in ReSqliteUn `"
-                        RESQUN_FUN_TABLE "`: %s\n",
-                        sqlite3_errmsg(db));
-            return rc;
-        }
-
-        rc = sqlite3_create_function_v2 (
-                    db,
-                    /* zFunctionName */ RESQUN_FUN_TABLE,
-                    /* nArg */ 2,
-                    /* eTextRep */ SQLITE_UTF8 | SQLITE_DETERMINISTIC,
-                    /* pApp */ static_cast<void*>(p_app),
-                    /* xFunc */ epoint_table,
-                    /* xStep */ NULL,
-                    /* xFinal */ NULL,
-                    /* xDestroy */ epoint_destroy);
-        if (rc != SQLITE_OK) {
-            *pzErrMsg = sqlite3_mprintf ("Failed to register function `"
-                                         RESQUN_FUN_TABLE "`: %s\n",
-                                         sqlite3_errmsg(db));
-            break;
-        }
-
-        rc = sqlite3_create_function_v2 (
-                    db,
-                    /* zFunctionName */ RESQUN_FUN_ACTIVE,
-                    /* nArg */ 0,
-                    /* eTextRep */ SQLITE_UTF8 | SQLITE_DETERMINISTIC,
-                    /* pApp */ static_cast<void*>(p_app),
-                    /* xFunc */ epoint_active,
-                    /* xStep */ NULL,
-                    /* xFinal */ NULL,
-                    /* xDestroy */ NULL);
-        if (rc != SQLITE_OK) {
-            *pzErrMsg = sqlite3_mprintf ("Failed to register function `"
-                                         RESQUN_FUN_ACTIVE "`: %s\n",
-                                         sqlite3_errmsg(db));
-            break;
-        }
-
-        rc = sqlite3_create_function_v2 (
-                    db,
-                    /* zFunctionName */ RESQUN_FUN_BEGIN,
-                    /* nArg */ -1,
-                    /* eTextRep */ SQLITE_UTF8 | SQLITE_DETERMINISTIC,
-                    /* pApp */ static_cast<void*>(p_app),
-                    /* xFunc */ epoint_begin,
-                    /* xStep */ NULL,
-                    /* xFinal */ NULL,
-                    /* xDestroy */ NULL);
-        if (rc != SQLITE_OK) {
-            *pzErrMsg = sqlite3_mprintf ("Failed to register function `"
-                                         RESQUN_FUN_BEGIN "`: %s\n",
-                                         sqlite3_errmsg(db));
-            break;
-        }
-
-        rc = sqlite3_create_function_v2 (
-                    db,
-                    /* zFunctionName */ RESQUN_FUN_END,
-                    /* nArg */ -1,
-                    /* eTextRep */ SQLITE_UTF8 | SQLITE_DETERMINISTIC,
-                    /* pApp */ static_cast<void*>(p_app),
-                    /* xFunc */ epoint_end,
-                    /* xStep */ NULL,
-                    /* xFinal */ NULL,
-                    /* xDestroy */ NULL);
-        if (rc != SQLITE_OK) {
-            *pzErrMsg = sqlite3_mprintf ("Failed to register function `"
-                                         RESQUN_FUN_END "`: %s\n",
-                                         sqlite3_errmsg(db));
-            break;
-        }
-
-        rc = sqlite3_create_function_v2 (
-                    db,
-                    /* zFunctionName */ RESQUN_FUN_UNDO,
-                    /* nArg */ 0,
-                    /* eTextRep */ SQLITE_UTF8 | SQLITE_DETERMINISTIC,
-                    /* pApp */ static_cast<void*>(p_app),
-                    /* xFunc */ epoint_undo,
-                    /* xStep */ NULL,
-                    /* xFinal */ NULL,
-                    /* xDestroy */ NULL);
-        if (rc != SQLITE_OK) {
-            *pzErrMsg = sqlite3_mprintf ("Failed to register function `"
-                                         RESQUN_FUN_UNDO "`: %s\n",
-                                         sqlite3_errmsg(db));
-            break;
-        }
-
-        rc = sqlite3_create_function_v2 (
-                    db,
-                    /* zFunctionName */ RESQUN_FUN_REDO,
-                    /* nArg */ 0,
-                    /* eTextRep */ SQLITE_UTF8 | SQLITE_DETERMINISTIC,
-                    /* pApp */ static_cast<void*>(p_app),
-                    /* xFunc */ epoint_redo,
-                    /* xStep */ NULL,
-                    /* xFinal */ NULL,
-                    /* xDestroy */ NULL);
-        if (rc != SQLITE_OK) {
-            *pzErrMsg = sqlite3_mprintf ("Failed to register function `"
-                                         RESQUN_FUN_REDO "`: %s\n",
-                                         sqlite3_errmsg(db));
-            break;
-        }
-
+        in_undo_ = true;
         break;
     }
     return rc;
 }
 /* ========================================================================= */
 
-} // extern "C"
-
-
 /* ------------------------------------------------------------------------- */
-typedef void(*xEntryPoint)(void);
-
-xEntryPoint getEntryPoint ()
+ReSqliteUn::SqLiteResult ReSqliteUn::end ()
 {
-    return (void(*)(void))sqlite3_resqliteun_init;
+    ReSqliteUn::SqLiteResult rc = SQLITE_ERROR;
+    for (;;) {
+
+        if (!is_active_) {
+            rc = SQLITE_MISUSE;
+            break;
+        }
+
+        is_active_ = false;
+
+        rc = SQLITE_OK;
+        break;
+    }
+    return rc;
 }
 /* ========================================================================= */
 
-/*  SQLITE Entry Points   ================================================== */
+/* ------------------------------------------------------------------------- */
+/**
+ * We're adding a table to the list of tables managed by the
+ * undo-redo mechanism.
+ */
+ReSqliteUn::SqLiteResult ReSqliteUn::attachToTable (
+        const QString & table, UpdateBehaviour update_kind)
+{
+    RESQLITEUN_TRACE_ENTRY;
+    QString statements = sqlTriggers (db_, table, update_kind);
+    // printf(statements.toLatin1().constData());
+
+    // This is inefficient as toUtf8 will allocate a new buffer;
+    // as sqlite3_exec only works with Utf8 (there is no 16 alternative)
+    // we are left with three options: use utf8 all over the place,
+    // the one below or reimplementing sqlite3_exec.
+    // As the this function will probably used only when the program starts,
+    // once for each table, the performance penality is neglijable IMHO.
+    char * err_msg;
+    ReSqliteUn::SqLiteResult rc = sqlite3_exec (
+                dtb_,
+                statements.toUtf8().constData (),
+                NULL, NULL, &err_msg);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to install triggers:\n%s\n\n%s\n",
+                err_msg, statements.toLatin1().constData());
+    }
+    RESQLITEUN_TRACE_EXIT;
+    return rc;
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+ReSqliteUnUtil::SqLiteResult deleteById (
+        sqlite3 * database, quint64 the_id)
+{
+    ReSqliteUnUtil::SqLiteResult rc = SQLITE_OK;
+    sqlite3_stmt *stmt = NULL;
+    for (;;) {
+
+        rc = sqlite3_prepare_v2 (
+                    database,
+                    "DELETE "
+                    " FROM " RESQUN_TBL_TEMP
+                    " WHERE idxid=?",
+                -1, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+            RESQLITEUN_DEBUGM("deleteById(): prepare failed: %s\n",
+                              sqlite3_errmsg(database));
+            break;
+        }
+        rc = sqlite3_bind_int64 (stmt, 1, the_id);
+        if (rc != SQLITE_OK) {
+            RESQLITEUN_DEBUGM("deleteById(): bind failed: %s\n",
+                              sqlite3_errmsg(database));
+            break;
+        }
+        rc = sqlite3_step (stmt);
+        if (rc != SQLITE_DONE) {
+            RESQLITEUN_DEBUGM("deleteById(): step failed: %s\n",
+                              sqlite3_errmsg(database));
+            break;
+        }
+
+        rc = SQLITE_OK;
+        break;
+    }
+    if (stmt != NULL) {
+        sqlite3_finalize(stmt);
+    }
+    return rc;
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+ReSqliteUnUtil::SqLiteResult statementsById (
+        sqlite3 * database, quint64 the_id, QString & result)
+{
+    ReSqliteUnUtil::SqLiteResult rc = SQLITE_OK;
+    sqlite3_stmt *stmt = NULL;
+    for (;;) {
+
+        rc = sqlite3_prepare_v2 (
+                    database,
+                    "SELECT group_concat(sql, ';')"
+                    " FROM " RESQUN_TBL_TEMP
+                    " WHERE idxid=?",
+                -1, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+            RESQLITEUN_DEBUGM("statementsById(): prepare failed: %s\n",
+                              sqlite3_errmsg(database));
+            break;
+        }
+        rc = sqlite3_bind_int64 (stmt, 1, the_id);
+        if (rc != SQLITE_OK) {
+            RESQLITEUN_DEBUGM("statementsById(): bind failed: %s\n",
+                              sqlite3_errmsg(database));
+            break;
+        }
+        rc = sqlite3_step (stmt);
+        if (rc != SQLITE_ROW) {
+            RESQLITEUN_DEBUGM("statementsById(): step failed: %s\n",
+                              sqlite3_errmsg(database));
+            break;
+        }
+
+        result = ReSqliteUn::columnText (stmt, 0);
+
+        rc = SQLITE_OK;
+        break;
+    }
+    if (stmt != NULL) {
+        sqlite3_finalize(stmt);
+    }
+    return rc;
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+ReSqliteUnUtil::SqLiteResult changeStatusById (
+        sqlite3 * database, quint64 the_id, int new_status)
+{
+    ReSqliteUnUtil::SqLiteResult rc = SQLITE_OK;
+    sqlite3_stmt *stmt = NULL;
+    for (;;) {
+
+        rc = sqlite3_prepare_v2 (
+                    database,
+                    "UPDATE " RESQUN_TBL_IDX
+                    " SET status=?"
+                    " WHERE id=?",
+                -1, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+            RESQLITEUN_DEBUGM("changeStatusById(): prepare failed: %s\n",
+                              sqlite3_errmsg(database));
+            break;
+        }
+        rc = sqlite3_bind_int (stmt, 1, new_status);
+        if (rc != SQLITE_OK) {
+            RESQLITEUN_DEBUGM("changeStatusById(): bind failed: %s\n",
+                              sqlite3_errmsg(database));
+            break;
+        }
+        rc = sqlite3_bind_int64 (stmt, 2, the_id);
+        if (rc != SQLITE_OK) {
+            RESQLITEUN_DEBUGM("changeStatusById(): bind failed: %s\n",
+                              sqlite3_errmsg(database));
+            break;
+        }
+        rc = sqlite3_step (stmt);
+        if (rc != SQLITE_DONE) {
+            RESQLITEUN_DEBUGM("changeStatusById(): step failed: %s\n",
+                              sqlite3_errmsg(database));
+            break;
+        }
+
+        rc = SQLITE_OK;
+        break;
+    }
+    if (stmt != NULL) {
+        sqlite3_finalize(stmt);
+    }
+    return rc;
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+ReSqliteUnUtil::SqLiteResult ReSqliteUn::performUndoRedo (
+        bool for_undo, QString &s_error)
+{
+    ReSqliteUnUtil::SqLiteResult rc = SQLITE_ERROR;
+    bool rollback = false;
+    for (;;) {
+        if (is_active_) {
+            rc = SQLITE_MISUSE;
+            break;
+        }
+
+        // Get the id of the undo or redo entry.
+        qint64 active = getActiveId (for_undo ? UndoType : RedoType);
+        if (active < 1) {
+            RESQLITEUN_DEBUGM("performUndoRedo(): getActiveId failed: %s\n",
+                              sqlite3_errmsg(dtb_));
+            rc = SQLITE_DONE;
+            break;
+        }
+
+        // Get the statements needed to get the database to former glory.
+        QString statements;
+        rc = statementsById (dtb_, active, statements);
+        if (rc != SQLITE_OK) {
+            RESQLITEUN_DEBUGM("performUndoRedo(): statementsById failed: %s\n",
+                              sqlite3_errmsg(dtb_));
+            break;
+        }
+
+        rc = sqlite3_exec (dtb_, "SAVEPOINT " RESQUN_SVP_UNDO,
+                NULL, NULL, NULL);
+        if (rc != SQLITE_OK) {
+            break;
+        }
+        rollback = true; {
+
+            // Delete all those old statements.
+            rc = deleteById (dtb_, active);
+            if (rc != SQLITE_OK) {
+                RESQLITEUN_DEBUGM("performUndoRedo(): statementsById failed: %s\n",
+                                  sqlite3_errmsg(dtb_));
+                break;
+            }
+
+            // Switch the status from undo to redo and vv.
+            rc = changeStatusById (
+                        dtb_, active, for_undo ?
+                            RESQUN_MARK_REDO : RESQUN_MARK_UNDO );
+            if (rc != SQLITE_OK) {
+                RESQLITEUN_DEBUGM("performUndoRedo(): changeStatusById failed: %s\n",
+                                  sqlite3_errmsg(dtb_));
+                break;
+            }
+
+            char * error_msg;
+            in_undo_ = !for_undo;
+            is_active_ = true; {
+                rc = sqlite3_exec (
+                            dtb_, statements.toUtf8 ().constData (),
+                            NULL, NULL, &error_msg);
+            } is_active_ = false;
+            if (rc != SQLITE_OK) {
+                s_error = tr("Cannot perform the update.\n%1").arg  (error_msg);
+                break;
+            }
+
+        } rollback = false;
+        sqlite3_exec (dtb_, "RELEASE SAVEPOINT " RESQUN_SVP_UNDO,
+            NULL, NULL, NULL);
+
+        break;
+    }
+    if (rollback) {
+        sqlite3_exec (dtb_,
+            "ROLLBACK TO SAVEPOINT " RESQUN_SVP_UNDO ";"
+            "RELEASE SAVEPOINT " RESQUN_SVP_UNDO,
+            NULL, NULL, NULL);
+    }
+    return rc;
+}
+/* ========================================================================= */
+
+
+/* ------------------------------------------------------------------------- */
+/**
+ * @warning The result is the error code (SQLITE_OK if all went well).
+ *
+ * @param undo_entries Resulted undo entries
+ * @param redo_entries Resulted redo entries
+ * @return error code
+ */
+ReSqliteUn::SqLiteResult ReSqliteUn::count (
+        qint64 &undo_entries, qint64 &redo_entries) const
+{
+    ReSqliteUn::SqLiteResult rc = SQLITE_OK;
+    sqlite3_stmt *stmt = NULL;
+    for (;;) {
+        rc = sqlite3_prepare_v2 (
+                    dtb_,
+                    "SELECT "
+                    "(SELECT COUNT(*) FROM " RESQUN_TBL_IDX " "
+                        "WHERE status=" STR(RESQUN_MARK_UNDO) ") AS UNDO,"
+                    "(SELECT COUNT(*) FROM " RESQUN_TBL_IDX " "
+                        "WHERE status=" STR(RESQUN_MARK_REDO) ") AS REDO;",
+                -1, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+            RESQLITEUN_DEBUGM("cunt(): prepare failed: %s\n",
+                              sqlite3_errmsg(dtb_));
+            break;
+        }
+
+        rc = sqlite3_step (stmt);
+        if (rc != SQLITE_ROW) {
+            RESQLITEUN_DEBUGM("cunt(): step failed: %s\n",
+                              sqlite3_errmsg(dtb_));
+            break;
+        }
+
+        undo_entries = sqlite3_column_int64 (stmt, 0);
+        redo_entries = sqlite3_column_int64 (stmt, 1);
+
+        rc = SQLITE_OK;
+        break;
+    }
+
+    if (stmt != NULL) {
+        sqlite3_finalize(stmt);
+    }
+    return rc;
+}
+/* ========================================================================= */
+
+
+/* ------------------------------------------------------------------------- */
+/**
+ * This method retrieves the current record based on the current state of the
+ * instance:
+ * - if active then:
+ *    - if in an undo statement => the latest undo entry (last)
+ *    - if in an redo statement => the earliest redo entry (first)
+ * - if inactive: the latest undo entry (last)
+ *
+ * @return the id of the active recordor -1
+ */
+qint64 ReSqliteUn::getActiveId (UndoRedoType ty) const
+{
+    qint64 result = -1;
+    ReSqliteUn::SqLiteResult rc = SQLITE_OK;
+    sqlite3_stmt *stmt = NULL;
+    for (;;) {
+        static const char * for_undo =
+                "SELECT MAX(id) FROM " RESQUN_TBL_IDX " "
+                    "WHERE status=" STR(RESQUN_MARK_UNDO) ";\n";
+        static const char * for_redo =
+                "SELECT MIN(id) FROM " RESQUN_TBL_IDX " "
+                    "WHERE status=" STR(RESQUN_MARK_REDO) ";\n";
+        const char * statement = NULL;
+        switch (ty) {
+        case UndoType: {
+            statement = for_undo;
+            break; }
+        case RedoType: {
+            statement = for_redo;
+            break; }
+        case NoUndoRedo:
+        case CurrentUndoRedo:
+        case BothUndoRedo:
+        default: {
+            if (is_active_) {
+                if (in_undo_) {
+                    statement = for_undo;
+                } else {
+                    statement = for_redo;
+                }
+            } else {
+                statement = for_undo;
+            }
+            break; }
+        }
+
+        rc = sqlite3_prepare_v2 (dtb_, statement, -1, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+            RESQLITEUN_DEBUGM("getActiveId(): prepare failed: %s\n",
+                              sqlite3_errmsg(dtb_));
+            break;
+        }
+
+        rc = sqlite3_step (stmt);
+        if (rc != SQLITE_ROW) {
+            RESQLITEUN_DEBUGM("getActiveId(): step failed: %s\n",
+                              sqlite3_errmsg(dtb_));
+            break;
+        }
+
+        result = sqlite3_column_int64 (stmt, 0);
+        break;
+    }
+    if (stmt != NULL) {
+        sqlite3_finalize(stmt);
+    }
+    return result;
+}
+/* ========================================================================= */
+
+
+/*  CLASS    =============================================================== */
 //
 //
 //

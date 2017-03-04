@@ -1,16 +1,16 @@
 /* ========================================================================= */
 /* ------------------------------------------------------------------------- */
 /**
- * @file resqliteun.h
- * @brief Declarations for ReSqliteUn class
+ * @file resqliteun-manager.h
+ * @brief Declarations for ReSqliteUnManager class
  * @author Nicu Tofan <nicu.tofan@gmail.com>
  * @copyright Copyright 2014 piles contributors. All rights reserved.
  * This file is released under the
  * [MIT License](http://opensource.org/licenses/mit-license.html)
  */
 
-#ifndef GUARD_RESQLITEUN_H_INCLUDE
-#define GUARD_RESQLITEUN_H_INCLUDE
+#ifndef GUARD_RESQLITEUN_MANAGER_H_INCLUDE
+#define GUARD_RESQLITEUN_MANAGER_H_INCLUDE
 
 /* ------------------------------------------------------------------------- */
 /* ========================================================================= */
@@ -20,11 +20,12 @@
 //
 /*  INCLUDES    ------------------------------------------------------------ */
 
-#include <resqliteun/resqliteun-manager.h>
-#include <resqliteun/resqliteun-util.h>
+#include <resqliteun/resqliteun-config.h>
+#include <resqliteun/resqliteun-names.h>
 
 #include <QString>
 #include <QList>
+#include <QCoreApplication>
 
 /*  INCLUDES    ============================================================ */
 //
@@ -33,6 +34,8 @@
 //
 /*  DEFINITIONS    --------------------------------------------------------- */
 
+class ReSqliteUn;
+
 /*  DEFINITIONS    ========================================================= */
 //
 //
@@ -40,14 +43,16 @@
 //
 /*  CLASS    --------------------------------------------------------------- */
 
-//! Adds undo-redo capabilities to a sqlite database.
-class RESQLITEUN_EXPORT ReSqliteUn :
-        public ReSqliteUnManager, public ReSqliteUnUtil {
+//! The management routines.
+class RESQLITEUN_EXPORT ReSqliteUnManager {
     //
     //
     //
     //
     /*  DEFINITIONS    ----------------------------------------------------- */
+    Q_DECLARE_TR_FUNCTIONS(ReSqliteUnManager)
+
+    typedef void(*xEntryPoint)(void);
 
     /*  DEFINITIONS    ===================================================== */
     //
@@ -57,9 +62,8 @@ class RESQLITEUN_EXPORT ReSqliteUn :
     /*  DATA    ------------------------------------------------------------ */
 
 public:
-    void * db_; /**< the actual sqlite database */
-    bool is_active_; /**< is the instance active  or not? */
-    bool in_undo_; /**< are we performing an undo or a redo (valid when is_active_) */
+
+    static QList<ReSqliteUn *> instances_; /**< the list of instances */
 
     /*  DATA    ============================================================ */
     //
@@ -71,45 +75,48 @@ public:
 public:
 
     //! Default constructor.
-    ReSqliteUn (
-            void *db);
+    ReSqliteUnManager () {}
 
     //! Destructor.
-    virtual ~ReSqliteUn ();
+    virtual ~ReSqliteUnManager () {}
 
+    //! The last instance.
+    static ReSqliteUn *
+    instance (
+            int interface_version=RESQLITEUN_VERSION);
 
-    //! Creates a restore point.
-    ReSqliteUn::SqLiteResult
-    begin (
-            const QString &s_name);
+    //! The number of instances.
+    static int
+    instanceCount () {
+        return instances_.count ();
+    }
 
-    //! Closes a restore point.
-    ReSqliteUn::SqLiteResult
-    end ();
+    //! The instance at a particular index.
+    static ReSqliteUn *
+    instanceForIndex (
+            int i,
+            int interface_version=RESQLITEUN_VERSION);
 
-    //! Creates the triggers for mentioned table.
-    ReSqliteUn::SqLiteResult
-    attachToTable (
-            const QString &table,
-            UpdateBehaviour update_kind);
+    //! The one and only instance.
+    static ReSqliteUn *
+    instanceForDatabase (
+            void * sqlite_database,
+            int interface_version=RESQLITEUN_VERSION);
 
-    //! Do an Undo or Redo.
-    ReSqliteUn::SqLiteResult
-    performUndoRedo (
-            bool for_undo,
-            QString &s_error);
+    //! Creates an instance of the clsaa for the given database.
+    static ReSqliteUn *
+    create (
+            void * db,
+            QString & s_error);
 
-    //! Get the number of entries in the temporary table by kind.
-    SqLiteResult
-    count (
-            qint64 & undo_entries,
-            qint64 & redo_entries) const;
+    //! The entry point for the sqlite3.
+    static xEntryPoint
+    getEntryPoint ();
 
-    //! Get the id of the undo or redo entry that should be used right now.
-    qint64
-    getActiveId (
-            UndoRedoType ty = CurrentUndoRedo) const;
-
+    //! Autoregister this extension with each new database
+    //! (when not using the plugin).
+    static bool
+    autoregister ();
 
     /*  FUNCTIONS    ======================================================= */
     //
@@ -125,7 +132,7 @@ public:
 //
 //
 
-#endif // GUARD_RESQLITEUN_H_INCLUDE
+#endif // GUARD_RESQLITEUN_MANAGER_H_INCLUDE
 
 /* ------------------------------------------------------------------------- */
 /* ========================================================================= */

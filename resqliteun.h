@@ -22,6 +22,7 @@
 
 #include <resqliteun/resqliteun-config.h>
 #include <QString>
+#include <QList>
 
 /*  INCLUDES    ============================================================ */
 //
@@ -169,7 +170,7 @@ public:
         a new entry of the redo kind. */
 
 
-    static ReSqliteUn * instance_; /**< the one and only instance */
+    static QList<ReSqliteUn *> instances_; /**< the list of instances */
 
     /*  DATA    ============================================================ */
     //
@@ -240,11 +241,28 @@ public:
 
 public:
 
+    //! The last instance.
+    static ReSqliteUn *
+    instance (
+            int interface_version=RESQLITEUN_VERSION);
+
+    //! The number of instances.
+    static int
+    instanceCount () {
+        return instances_.count ();
+    }
+
+    //! The instance at a particular index.
+    static ReSqliteUn *
+    instanceForIndex (
+            int i,
+            int interface_version=RESQLITEUN_VERSION);
+
     //! The one and only instance.
     static ReSqliteUn *
-    instance () {
-        return instance_;
-    }
+    instanceForDatabase (
+            void * sqlite_database,
+            int interface_version=RESQLITEUN_VERSION);
 
     //! Autoregister this extension with each new database (when not using the plugin).
     static bool

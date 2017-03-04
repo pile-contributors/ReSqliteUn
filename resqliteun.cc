@@ -142,6 +142,17 @@ static void epoint_begin (
             sqlite3_context *context, int argc, sqlite3_value **argv)
 {
     for (;;) {
+        QString name;
+        if (argc > 1) {
+            sqlite3_result_error (
+                        context,
+                        RESQUN_FUN_BEGIN " takes zero or one argument", -1);
+            sqlite3_result_error_code (context, SQLITE_CONSTRAINT);
+            return;
+        } else if (argc == 1) {
+            name = value2string (argv[1]);
+        }
+
         ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
         assert(p_app != NULL);
 
@@ -153,7 +164,7 @@ static void epoint_begin (
         sqlite3 * db = sqlite3_context_db_handle(context);
         assert(db == static_cast<sqlite3 *>(p_app->db_));
 
-        ReSqliteUn::SqLiteResult rc = p_app->begin ();
+        ReSqliteUn::SqLiteResult rc = p_app->begin (name);
         if (rc != SQLITE_OK) {
             sqlite3_result_error_code (context, rc);
             break;
@@ -417,8 +428,20 @@ RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
 
         ReSqliteUn * p_app = new ReSqliteUn (static_cast<void*> (db));
 
+        // AUTOINCREMENT is justified because we use the indices to
+        // have the entries sorted by time.
         rc = sqlite3_exec (db,
-            "CREATE TEMP TABLE " RESQUN_TBL_TEMP "(sql TEXT, status INTEGER)",
+            "CREATE TEMP TABLE IF NOT EXISTS " RESQUN_TBL_IDX "("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "name TEXT, "
+                "status INTEGER "
+            ");"
+            "CREATE TEMP TABLE IF NOT EXISTS " RESQUN_TBL_TEMP "("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "sql TEXT, "
+                "status INTEGER, "
+                "FOREIGN KEY(idxid) REFERENCES " RESQUN_TBL_IDX "(id) "
+            ");",
             NULL, NULL, NULL);
         if (rc != SQLITE_OK) {
             return rc;
@@ -461,7 +484,7 @@ RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
         rc = sqlite3_create_function_v2 (
                     db,
                     /* zFunctionName */ RESQUN_FUN_BEGIN,
-                    /* nArg */ 0,
+                    /* nArg */ -1,
                     /* eTextRep */ SQLITE_UTF8 | SQLITE_DETERMINISTIC,
                     /* pApp */ static_cast<void*>(p_app),
                     /* xFunc */ epoint_begin,
@@ -478,7 +501,7 @@ RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
         rc = sqlite3_create_function_v2 (
                     db,
                     /* zFunctionName */ RESQUN_FUN_END,
-                    /* nArg */ 0,
+                    /* nArg */ -1,
                     /* eTextRep */ SQLITE_UTF8 | SQLITE_DETERMINISTIC,
                     /* pApp */ static_cast<void*>(p_app),
                     /* xFunc */ epoint_end,

@@ -399,16 +399,27 @@ bool ReSqliteUn::attachToTable (
 /* ========================================================================= */
 
 /* ------------------------------------------------------------------------- */
+
 ReSqliteUn::SqLiteResult ReSqliteUn::lastStepId (
-        bool for_undo, qint64 &result) const
+        bool for_undo, qint64 &result, bool rowid) const
 {
     ReSqliteUn::SqLiteResult rc = SQLITE_OK;
     sqlite3_stmt *stmt = NULL;
     for (;;) {
-        rc = sqlite3_prepare_v2 (
-                    dtb_,
-                    for_undo ? s_sql_u_maxid_ : s_sql_r_maxid_, -1,
-                    &stmt, NULL);
+        if (rowid) {
+            rc = sqlite3_prepare_v2 (
+                        dtb_,
+                        for_undo ? s_sql_u_maxid_ : s_sql_r_maxid_, -1,
+                        &stmt, NULL);
+        } else {
+            rc = sqlite3_prepare_v2 (
+                        dtb_,
+                        for_undo ?
+                                "SELECT max(id) FROM " RESQUN_TBL_IDX " WHERE status=" RESQUN_MARK_UNDO ";" :
+                                "SELECT max(id) FROM " RESQUN_TBL_IDX " WHERE status=" RESQUN_MARK_REDO ";",
+                        -1,
+                        &stmt, NULL);
+        }
         if (rc != SQLITE_OK) {
 
             break;
@@ -537,14 +548,25 @@ ReSqliteUn::SqLiteResult ReSqliteUn::getLastSqlStatement (
 /* ========================================================================= */
 
 /* ------------------------------------------------------------------------- */
+/**
+ * Deletes a single row if \b rowid is true by interpreting first argumnt
+ * to be the rowid of the record. Deletes all records associated with
+ * an index record if \b rowid is false.
+ *
+ * @param id The id to filter by.
+ * @param rowid Tell if the previous parameter is a rowid or an index id
+ * @return SQLITE_OK if all went fine
+ */
 ReSqliteUn::SqLiteResult ReSqliteUn::deleteForId (
-        qint64 rowid) const
+        qint64 id, bool rowid) const
 {
     ReSqliteUn::SqLiteResult rc = SQLITE_OK;
     sqlite3_stmt *stmt = NULL;
     for (;;) {
         rc = sqlite3_prepare_v2 (dtb_,
-                "DELETE FROM " RESQUN_TBL_TEMP " WHERE rowid=?",
+                rowid ?
+                    "DELETE FROM " RESQUN_TBL_TEMP " WHERE rowid=?" :
+                    "DELETE FROM " RESQUN_TBL_TEMP " WHERE idxid=?",
                 -1, &stmt, NULL);
         if (rc != SQLITE_OK) {
 
@@ -613,10 +635,11 @@ ReSqliteUn::SqLiteResult ReSqliteUn::count (
 
 /* ------------------------------------------------------------------------- */
 /**
- *
+ * @param s_name The name to be inserted in the index table.
  * @return error code
  */
-ReSqliteUn::SqLiteResult ReSqliteUn::begin ()
+ReSqliteUn::SqLiteResult ReSqliteUn::begin (
+        const QString & s_name)
 {
     ReSqliteUn::SqLiteResult rc = SQLITE_ERROR;
     for (;;) {
@@ -627,11 +650,15 @@ ReSqliteUn::SqLiteResult ReSqliteUn::begin ()
         }
 
         // Remove all "redo" entries and place a marker for first undo entry.
-        rc = sqlite3_exec(
-            dtb_,
+        QString statements = QString (
             "SAVEPOINT " RESQUN_SVP_BEGIN ";"
+            "DELETE FROM " RESQUN_TBL_IDX " WHERE status=" RESQUN_MARK_REDO ";"
             "DELETE FROM " RESQUN_TBL_TEMP " WHERE status=" RESQUN_MARK_REDO ";"
-            "INSERT INTO " RESQUN_TBL_TEMP "(sql, status) VALUES(''," RESQUN_MARK_UNDO ");",
+            "INSERT INTO " RESQUN_TBL_IDX "(name, status) VALUES('%1'," RESQUN_MARK_UNDO ");")
+                .arg (s_name);
+        rc = sqlite3_exec (
+            dtb_,
+            statements.toUtf8().constData (),
             NULL, NULL, NULL);
         if (rc != SQLITE_OK) {
             sqlite3_exec (dtb_,

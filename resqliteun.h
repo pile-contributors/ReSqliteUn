@@ -79,6 +79,11 @@
 #define RESQUN_TBL_TEMP     RESQUN_PREFIX "sqlite_undo"
 #endif // RESQUN_TBL_TEMP
 
+#ifndef RESQUN_TBL_IDX
+//! The table to be used for storing undo-redo indices.
+#define RESQUN_TBL_IDX     RESQUN_PREFIX "sqlite_itbl"
+#endif // RESQUN_TBL_IDX
+
 #ifndef RESQUN_SVP_BEGIN
 //! Name of the savepoint used in `begin` command.
 #define RESQUN_SVP_BEGIN    RESQUN_PREFIX "begin_svp"
@@ -91,12 +96,12 @@
 
 #ifndef RESQUN_MARK_UNDO
 //! Marker used in temporary table to indicate an UNDO entry.
-#define RESQUN_MARK_UNDO    "'U'"
+#define RESQUN_MARK_UNDO    "0"
 #endif // RESQUN_MARK_UNDO
 
 #ifndef RESQUN_MARK_REDO
 //! Marker used in temporary table to indicate an REDO entry.
-#define RESQUN_MARK_REDO    "'R'"
+#define RESQUN_MARK_REDO    "1"
 #endif // RESQUN_MARK_REDO
 
 
@@ -195,11 +200,12 @@ public:
             qint64 & undo_entries,
             qint64 & redo_entries) const;
 
-    //! Get the rowid of the last recorded undo or redo step.
+    //! Get the (row)id of the last recorded undo or redo step.
     SqLiteResult
     lastStepId (
             bool for_undo,
-            qint64 & result) const;
+            qint64 & result,
+            bool rowid=false) const;
 
     //! Read the sql statement from the temporary table.
     SqLiteResult
@@ -215,7 +221,8 @@ public:
     //! Delete a record from the temporary table.
     SqLiteResult
     deleteForId (
-            qint64 rowid) const;
+            qint64 id,
+            bool rowid=false) const;
 
     //! Insert a new record.
     SqLiteResult
@@ -224,7 +231,8 @@ public:
 
     //! Creates a restore point.
     ReSqliteUn::SqLiteResult
-    begin ();
+    begin (
+            const QString &s_name);
 
     //! Closes a restore point.
     ReSqliteUn::SqLiteResult

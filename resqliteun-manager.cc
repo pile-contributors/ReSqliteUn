@@ -126,7 +126,9 @@ ReSqliteUn *ReSqliteUnManager::instanceForDatabase (
 /* ------------------------------------------------------------------------- */
 bool ReSqliteUnManager::autoregister ()
 {
+    RESQLITEUN_TRACE_ENTRY;
     int rc = sqlite3_auto_extension (getEntryPoint ());
+    RESQLITEUN_TRACE_EXIT;
     return (rc == SQLITE_OK);
 }
 /* ========================================================================= */

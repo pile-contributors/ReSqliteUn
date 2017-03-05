@@ -126,10 +126,12 @@ static void epoint_table (
 static void epoint_active (
             sqlite3_context *context, int argc, sqlite3_value **argv)
 {
+    RESQLITEUN_TRACE_ENTRY;
     ReSqliteUn * p_app = static_cast<ReSqliteUn *>(sqlite3_user_data (context));
     assert(p_app != NULL);
 
     sqlite3_result_int (context, p_app->is_active_ ? 1 : 0);
+    RESQLITEUN_TRACE_EXIT;
 }
 /* ========================================================================= */
 
@@ -138,6 +140,7 @@ static void epoint_active (
 static void epoint_begin (
             sqlite3_context *context, int argc, sqlite3_value **argv)
 {
+    RESQLITEUN_TRACE_ENTRY;
     for (;;) {
         QString name;
         if (argc > 1) {
@@ -169,6 +172,7 @@ static void epoint_begin (
 
         break;
     }
+    RESQLITEUN_TRACE_EXIT;
 }
 /* ========================================================================= */
 
@@ -177,6 +181,7 @@ static void epoint_begin (
 static void epoint_getid (
             sqlite3_context *context, int argc, sqlite3_value **argv)
 {
+    RESQLITEUN_TRACE_ENTRY;
 
     ReSqliteUn * p_app =
             static_cast<ReSqliteUn *>(sqlite3_user_data (context));
@@ -186,6 +191,8 @@ static void epoint_getid (
     assert(db == static_cast<sqlite3 *>(p_app->db_));
 
     sqlite3_result_int64 (context, p_app->getActiveId ());
+
+    RESQLITEUN_TRACE_EXIT;
 }
 /* ========================================================================= */
 
@@ -200,6 +207,7 @@ static void epoint_getid (
 static void epoint_end (
             sqlite3_context *context, int argc, sqlite3_value **argv)
 {
+    RESQLITEUN_TRACE_ENTRY;
     sqlite3_stmt *stmt = NULL;
     for (;;) {
         if (argc > 1) {
@@ -294,6 +302,7 @@ static void epoint_end (
     if (stmt != NULL) {
         sqlite3_finalize(stmt);
     }
+    RESQLITEUN_TRACE_EXIT;
 }
 /* ========================================================================= */
 
@@ -302,6 +311,7 @@ static void epoint_end (
 //! Implementation of the `redo` and `undo` function.
 static void preform_ur (sqlite3_context *context, bool for_undo)
 {
+    RESQLITEUN_TRACE_ENTRY;
     int rc = SQLITE_OK;
 
     for (;;) {
@@ -333,6 +343,7 @@ static void preform_ur (sqlite3_context *context, bool for_undo)
     if (rc != SQLITE_OK) {
         sqlite3_result_error_code (context, rc);
     }
+    RESQLITEUN_TRACE_EXIT;
 }
 /* ========================================================================= */
 
@@ -341,7 +352,9 @@ static void preform_ur (sqlite3_context *context, bool for_undo)
 static void epoint_undo (
             sqlite3_context *context, int argc, sqlite3_value **argv)
 {
+    RESQLITEUN_TRACE_ENTRY;
     preform_ur (context, true);
+    RESQLITEUN_TRACE_EXIT;
 }
 /* ========================================================================= */
 
@@ -350,7 +363,9 @@ static void epoint_undo (
 static void epoint_redo (
             sqlite3_context *context, int argc, sqlite3_value **argv)
 {
+    RESQLITEUN_TRACE_ENTRY;
     preform_ur (context, false);
+    RESQLITEUN_TRACE_EXIT;
 }
 /* ========================================================================= */
 
@@ -358,8 +373,10 @@ static void epoint_redo (
 //! Implementation of the application's `destroy` function.
 static void epoint_destroy (void *value)
 {
+    RESQLITEUN_TRACE_ENTRY;
     ReSqliteUn * p_app = static_cast<ReSqliteUn *>(value);
     delete p_app;
+    RESQLITEUN_TRACE_EXIT;
 }
 /* ========================================================================= */
 
@@ -368,6 +385,7 @@ static void epoint_destroy (void *value)
 RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
             sqlite3 *db, char **pzErrMsg, const sqlite3_api_routines *pApi)
 {
+    RESQLITEUN_TRACE_ENTRY;
     int rc = SQLITE_ERROR;
     for (;;) {
         SQLITE_EXTENSION_INIT2(pApi);
@@ -382,6 +400,7 @@ RESQLITEUN_EXPORT int sqlite3_resqliteun_init (
         rc = SQLITE_OK;
         break;
     }
+    RESQLITEUN_TRACE_EXIT;
     return rc;
 }
 /* ========================================================================= */
@@ -440,6 +459,7 @@ FuncDescr entry_points[] = {
 /* ------------------------------------------------------------------------- */
 ReSqliteUn *ReSqliteUnManager::create (void *database, QString & s_error)
 {
+    RESQLITEUN_TRACE_ENTRY;
 
     sqlite3* db = static_cast<sqlite3*>(database);
     ReSqliteUn * p_app = new ReSqliteUn (static_cast<void*> (db));
@@ -513,6 +533,8 @@ ReSqliteUn *ReSqliteUnManager::create (void *database, QString & s_error)
         delete p_app;
         p_app = NULL;
     }
+
+    RESQLITEUN_TRACE_EXIT;
     return p_app;
 }
 /* ========================================================================= */

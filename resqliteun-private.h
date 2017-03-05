@@ -11,21 +11,25 @@
 #define GUARD_RESQLITEUN_PRIVATE_H_INCLUDE
 
 #include <resqliteun/resqliteun-config.h>
+#include <QDebug>
 
-#if 0
-#    define RESQLITEUN_DEBUGM printf
+#if 1
+//#    define RESQLITEUN_DEBUGM printf
+#    define RESQLITEUN_DEBUGM qDebug() << QString::asprintf
 #else
 #    define RESQLITEUN_DEBUGM black_hole
 #endif
 
-#if 0
-#    define RESQLITEUN_TRACE_ENTRY printf("RESQLITEUN ENTRY %s in %s[%d]\n", __func__, __FILE__, __LINE__)
+#if 1
+//#    define RESQLITEUN_TRACE_ENTRY printf("RESQLITEUN ENTRY %s in %s[%d]\n", __func__, __FILE__, __LINE__)
+#    define RESQLITEUN_TRACE_ENTRY qDebug() << QString::asprintf("RESQLITEUN ENTRY %s", __func__)
 #else
 #    define RESQLITEUN_TRACE_ENTRY
 #endif
 
-#if 0
-#    define RESQLITEUN_TRACE_EXIT printf("RESQLITEUN EXIT %s in %s[%d]\n", __func__, __FILE__, __LINE__)
+#if 1
+//#    define RESQLITEUN_TRACE_EXIT printf("RESQLITEUN EXIT %s in %s[%d]\n", __func__, __FILE__, __LINE__)
+#    define RESQLITEUN_TRACE_EXIT qDebug() << QString::asprintf("RESQLITEUN EXIT %s", __func__)
 #else
 #    define RESQLITEUN_TRACE_EXIT
 #endif

@@ -101,10 +101,12 @@ ReSqliteUn::~ReSqliteUn()
 ReSqliteUn::SqLiteResult ReSqliteUn::begin (
         const QString & s_name, qint64 * entry_id)
 {
+    RESQLITEUN_TRACE_ENTRY;
     ReSqliteUn::SqLiteResult rc = SQLITE_ERROR;
     for (;;) {
 
         if (is_active_) {
+            RESQLITEUN_DEBUGM("Already in active state; cannot begin");
             rc = SQLITE_MISUSE;
             break;
         }
@@ -135,6 +137,7 @@ ReSqliteUn::SqLiteResult ReSqliteUn::begin (
             rc = SQLITE_ERROR;
         } else {
             is_active_ = true;
+            RESQLITEUN_DEBUGM("State changed to active by begin command");
             rc = SQLITE_OK;
 
             if (entry_id != NULL) {
@@ -147,6 +150,7 @@ ReSqliteUn::SqLiteResult ReSqliteUn::begin (
         in_undo_ = true;
         break;
     }
+    RESQLITEUN_TRACE_EXIT;
     return rc;
 }
 /* ========================================================================= */
@@ -154,6 +158,7 @@ ReSqliteUn::SqLiteResult ReSqliteUn::begin (
 /* ------------------------------------------------------------------------- */
 ReSqliteUn::SqLiteResult ReSqliteUn::end ()
 {
+    RESQLITEUN_TRACE_ENTRY;
     ReSqliteUn::SqLiteResult rc = SQLITE_ERROR;
     for (;;) {
 
@@ -162,11 +167,13 @@ ReSqliteUn::SqLiteResult ReSqliteUn::end ()
             break;
         }
 
+        RESQLITEUN_DEBUGM("State changed to inactive by end command");
         is_active_ = false;
 
         rc = SQLITE_OK;
         break;
     }
+    RESQLITEUN_TRACE_EXIT;
     return rc;
 }
 /* ========================================================================= */
@@ -195,9 +202,10 @@ ReSqliteUn::SqLiteResult ReSqliteUn::attachToTable (
                 statements.toUtf8().constData (),
                 NULL, NULL, &err_msg);
     if (rc != SQLITE_OK) {
-        fprintf(stderr, "Failed to install triggers:\n%s\n\n%s\n",
-                err_msg, statements.toLatin1().constData());
-    }
+        qWarning() << "Failed to install triggers:"
+                   << err_msg << endl
+                   << statements;
+     }
     RESQLITEUN_TRACE_EXIT;
     return rc;
 }
@@ -207,6 +215,7 @@ ReSqliteUn::SqLiteResult ReSqliteUn::attachToTable (
 ReSqliteUnUtil::SqLiteResult deleteById (
         sqlite3 * database, quint64 the_id)
 {
+    RESQLITEUN_TRACE_ENTRY;
     ReSqliteUnUtil::SqLiteResult rc = SQLITE_OK;
     sqlite3_stmt *stmt = NULL;
     for (;;) {
@@ -241,6 +250,7 @@ ReSqliteUnUtil::SqLiteResult deleteById (
     if (stmt != NULL) {
         sqlite3_finalize(stmt);
     }
+    RESQLITEUN_TRACE_EXIT;
     return rc;
 }
 /* ========================================================================= */
@@ -249,6 +259,7 @@ ReSqliteUnUtil::SqLiteResult deleteById (
 ReSqliteUnUtil::SqLiteResult statementsById (
         sqlite3 * database, quint64 the_id, QString & result)
 {
+    RESQLITEUN_TRACE_ENTRY;
     ReSqliteUnUtil::SqLiteResult rc = SQLITE_OK;
     sqlite3_stmt *stmt = NULL;
     for (;;) {
@@ -285,6 +296,7 @@ ReSqliteUnUtil::SqLiteResult statementsById (
     if (stmt != NULL) {
         sqlite3_finalize(stmt);
     }
+    RESQLITEUN_TRACE_EXIT;
     return rc;
 }
 /* ========================================================================= */
@@ -293,6 +305,7 @@ ReSqliteUnUtil::SqLiteResult statementsById (
 ReSqliteUnUtil::SqLiteResult changeStatusById (
         sqlite3 * database, quint64 the_id, int new_status)
 {
+    RESQLITEUN_TRACE_ENTRY;
     ReSqliteUnUtil::SqLiteResult rc = SQLITE_OK;
     sqlite3_stmt *stmt = NULL;
     for (;;) {
@@ -333,6 +346,25 @@ ReSqliteUnUtil::SqLiteResult changeStatusById (
     if (stmt != NULL) {
         sqlite3_finalize(stmt);
     }
+    RESQLITEUN_TRACE_EXIT;
+    return rc;
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+ReSqliteUnUtil::SqLiteResult ReSqliteUn::performUndoRedo (
+        int steps, bool for_undo, QString &s_error)
+{
+    RESQLITEUN_TRACE_ENTRY;
+    ReSqliteUnUtil::SqLiteResult rc = SQLITE_ERROR;
+    for (int i = 0; i < steps; ++i) {
+        rc = performUndoRedo (for_undo, s_error);
+        if (rc != SQLITE_OK) {
+            s_error.prepend (tr ("At step %1: ").arg (i+1));
+            break;
+        }
+    }
+    RESQLITEUN_TRACE_EXIT;
     return rc;
 }
 /* ========================================================================= */
@@ -341,11 +373,13 @@ ReSqliteUnUtil::SqLiteResult changeStatusById (
 ReSqliteUnUtil::SqLiteResult ReSqliteUn::performUndoRedo (
         bool for_undo, QString &s_error)
 {
+    RESQLITEUN_TRACE_ENTRY;
     ReSqliteUnUtil::SqLiteResult rc = SQLITE_ERROR;
     bool rollback = false;
     for (;;) {
         if (is_active_) {
             rc = SQLITE_MISUSE;
+            s_error = "Cannot undo/redo while active";
             break;
         }
 
@@ -394,11 +428,15 @@ ReSqliteUnUtil::SqLiteResult ReSqliteUn::performUndoRedo (
 
             char * error_msg;
             in_undo_ = !for_undo;
-            is_active_ = true; {
+            if (!statements.isEmpty ()) {
+                is_active_ = true;
+                RESQLITEUN_DEBUGM("State changed to active by undo/redo command");
                 rc = sqlite3_exec (
                             dtb_, statements.toUtf8 ().constData (),
                             NULL, NULL, &error_msg);
-            } is_active_ = false;
+                RESQLITEUN_DEBUGM("State changed to inactive by undo/redo command");
+                is_active_ = false;
+            }
             if (rc != SQLITE_OK) {
                 s_error = tr("Cannot perform the update.\n%1").arg  (error_msg);
                 break;
@@ -416,6 +454,65 @@ ReSqliteUnUtil::SqLiteResult ReSqliteUn::performUndoRedo (
             "RELEASE SAVEPOINT " RESQUN_SVP_UNDO,
             NULL, NULL, NULL);
     }
+    RESQLITEUN_TRACE_EXIT;
+    return rc;
+}
+/* ========================================================================= */
+
+/* ------------------------------------------------------------------------- */
+ReSqliteUnUtil::SqLiteResult ReSqliteUn::stepsToGoal (
+        bool for_undo, qint64 goal_id, int &steps)
+{
+    RESQLITEUN_TRACE_ENTRY;
+    ReSqliteUnUtil::SqLiteResult rc = SQLITE_ERROR;
+    sqlite3_stmt *stmt = NULL;
+    for (;;) {
+
+        static const char * for_undo =
+                "SELECT COUNT(id) FROM " RESQUN_TBL_IDX " "
+                    "WHERE status=" STR(RESQUN_MARK_UNDO) " "
+                    "AND id>=?;\n";
+        static const char * for_redo =
+                "SELECT MIN(id) FROM " RESQUN_TBL_IDX " "
+                    "WHERE status=" STR(RESQUN_MARK_REDO) " "
+                    "AND id <=?;\n";
+        const char * statement = NULL;
+        if (for_undo) {
+            statement = for_undo;
+        } else {
+            statement = for_redo;
+        }
+
+        rc = sqlite3_prepare_v2 (dtb_, statement, -1, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+            RESQLITEUN_DEBUGM("stepsToGoal(): prepare failed: %s\n",
+                              sqlite3_errmsg(dtb_));
+            break;
+        }
+
+        rc = sqlite3_bind_int64 (stmt, 1, goal_id);
+        if (rc != SQLITE_OK) {
+            RESQLITEUN_DEBUGM("stepsToGoal(): prepare failed: %s\n",
+                              sqlite3_errmsg(dtb_));
+            break;
+        }
+
+        rc = sqlite3_step (stmt);
+        if (rc != SQLITE_ROW) {
+            RESQLITEUN_DEBUGM("stepsToGoal(): step failed: %s\n",
+                              sqlite3_errmsg(dtb_));
+            break;
+        }
+
+        steps = sqlite3_column_int (stmt, 0);
+
+        rc = SQLITE_OK;
+        break;
+    }
+    if (stmt != NULL) {
+        sqlite3_finalize(stmt);
+    }
+    RESQLITEUN_TRACE_EXIT;
     return rc;
 }
 /* ========================================================================= */
@@ -432,6 +529,7 @@ ReSqliteUnUtil::SqLiteResult ReSqliteUn::performUndoRedo (
 ReSqliteUn::SqLiteResult ReSqliteUn::count (
         qint64 &undo_entries, qint64 &redo_entries) const
 {
+    RESQLITEUN_TRACE_ENTRY;
     ReSqliteUn::SqLiteResult rc = SQLITE_OK;
     sqlite3_stmt *stmt = NULL;
     for (;;) {
@@ -466,6 +564,7 @@ ReSqliteUn::SqLiteResult ReSqliteUn::count (
     if (stmt != NULL) {
         sqlite3_finalize(stmt);
     }
+    RESQLITEUN_TRACE_EXIT;
     return rc;
 }
 /* ========================================================================= */
@@ -484,6 +583,7 @@ ReSqliteUn::SqLiteResult ReSqliteUn::count (
  */
 qint64 ReSqliteUn::getActiveId (UndoRedoType ty) const
 {
+    RESQLITEUN_TRACE_ENTRY;
     qint64 result = -1;
     ReSqliteUn::SqLiteResult rc = SQLITE_OK;
     sqlite3_stmt *stmt = NULL;
@@ -538,6 +638,7 @@ qint64 ReSqliteUn::getActiveId (UndoRedoType ty) const
     if (stmt != NULL) {
         sqlite3_finalize(stmt);
     }
+    RESQLITEUN_TRACE_EXIT;
     return result;
 }
 /* ========================================================================= */

@@ -95,6 +95,7 @@ QString ReSqliteUnUtil::value2string (void * val)
 QString ReSqliteUnUtil::sqlTriggers (
         void * db, const QString & table, UpdateBehaviour update_kind)
 {
+    RESQLITEUN_TRACE_ENTRY;
     sqlite3_stmt *stmt;
 
     QString statement = QStringLiteral("PRAGMA table_info(") % table %
@@ -167,8 +168,9 @@ QString ReSqliteUnUtil::sqlTriggers (
         }
     }
 
+    QString result;
     if (rc == SQLITE_DONE) {
-        return
+        result =
             (update_kind == OneTriggerPerUpdatedTable ?
                  sqlUpdateTriggerPerTable (table, upd_tbl_value) :
                  empty) %
@@ -176,11 +178,13 @@ QString ReSqliteUnUtil::sqlTriggers (
             sqlInsertTrigger (table) %
             upd_col_value;
     } else {
-        return empty;
+        result = empty;
     }
+
+    RESQLITEUN_TRACE_EXIT;
+    return result;
 }
 /* ========================================================================= */
-
 
 /* ------------------------------------------------------------------------- */
 /**
@@ -330,15 +334,79 @@ QString ReSqliteUnUtil::sqlUpdateTriggerPerTable (
                       "WHERE rowid='||OLD.rowid||';',\n"
                   RESQUN_FUN_GETID "()\n"
              ");\n"
-         "END;\n");
+                                   "END;\n");
+}
+/* ========================================================================= */
+#include <QWidget>
+#include <QVBoxLayout>
+#include <QTableView>
+#include <QSqlRelationalTableModel>
+
+class DebugViewManager : public QObject {
+    Q_OBJECT
+public:
+    QWidget * wdg;
+    QTableView * tv1;
+    QTableView * tv2;
+    QSqlTableModel *model1;
+    QSqlTableModel *model2;
+
+    DebugViewManager(QSqlDatabase database, QWidget * parent) :
+        QObject ()
+    {
+        wdg = new QWidget(parent);
+        wdg->setAttribute (Qt::WA_DeleteOnClose);
+        this->setParent (wdg);
+        QVBoxLayout * main_lay = new QVBoxLayout (wdg);
+
+        tv1 = new QTableView (wdg);
+        model1 = new QSqlTableModel (
+                    tv1, database);
+        model1->setTable (RESQUN_TBL_IDX);
+        model1->setEditStrategy (QSqlTableModel::OnFieldChange);
+        model1->select ();
+        model1->setHeaderData (0, Qt::Horizontal, tr ("ID"));
+        model1->setHeaderData (1, Qt::Horizontal, tr ("Name"));
+        model1->setHeaderData (1, Qt::Horizontal, tr ("Status"));
+        tv1->setModel (model1);
+        main_lay->addWidget (tv1);
+
+        tv2 = new QTableView (wdg);
+        model2 = new QSqlTableModel (
+                    tv2, database);
+        model2->setTable (RESQUN_TBL_TEMP);
+        model2->setEditStrategy (QSqlTableModel::OnFieldChange);
+        model2->select ();
+        model2->setHeaderData (0, Qt::Horizontal, tr ("ID"));
+        model2->setHeaderData (1, Qt::Horizontal, tr ("SQ"));
+        model2->setHeaderData (2, Qt::Horizontal, tr ("Idx"));
+//        model2->setRelation (
+//                    2, QSqlRelation(RESQUN_TBL_IDX, "id", "name"));
+        tv2->setModel (model2);
+        main_lay->addWidget (tv2);
+
+        wdg->setLayout (main_lay);
+
+        startTimer(500);
+    }
+
+    virtual void timerEvent (QTimerEvent *event) {
+        model1->select ();
+        model2->select ();
+    }
+
+};
+
+/* ------------------------------------------------------------------------- */
+QWidget *ReSqliteUnUtil::createDebugView (
+        QSqlDatabase database, QWidget * parent)
+{
+    DebugViewManager * mmm = new DebugViewManager (database, parent);
+    return mmm->wdg;
 }
 /* ========================================================================= */
 
-
-
-
-
-
+#include "resqliteun-util.moc"
 
 /*  CLASS    =============================================================== */
 //

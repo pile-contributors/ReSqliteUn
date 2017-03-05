@@ -35,6 +35,11 @@
 
 class ReSqliteUn;
 
+QT_BEGIN_NAMESPACE
+class QWidget;
+class QSqlDatabase;
+QT_END_NAMESPACE
+
 /*  DEFINITIONS    ========================================================= */
 //
 //
@@ -145,6 +150,12 @@ public:
     sqlUpdateTriggerPerTable (
             const QString &s_table,
             const QString &s_column_list);
+
+    //! Creates an autorefresh view into the temporary tables.
+    static QWidget *
+    createDebugView (
+            QSqlDatabase database,
+            QWidget * parent = NULL);
 
     /*  FUNCTIONS    ======================================================= */
     //

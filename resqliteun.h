@@ -100,6 +100,20 @@ public:
             bool for_undo,
             QString &s_error);
 
+    //! Do multiple Undo or Redo.
+    ReSqliteUn::SqLiteResult
+    performUndoRedo (
+            int steps,
+            bool for_undo,
+            QString &s_error);
+
+    //! Get the number of steps required to reach a certain id.
+    ReSqliteUn::SqLiteResult
+    stepsToGoal (
+            bool for_undo,
+            qint64 goal_id,
+            int &steps);
+
     //! Get the number of entries in the temporary table by kind.
     SqLiteResult
     count (
@@ -110,7 +124,6 @@ public:
     qint64
     getActiveId (
             UndoRedoType ty = CurrentUndoRedo) const;
-
 
     /*  FUNCTIONS    ======================================================= */
     //

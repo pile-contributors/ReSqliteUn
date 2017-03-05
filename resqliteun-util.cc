@@ -340,12 +340,15 @@ QString ReSqliteUnUtil::sqlUpdateTriggerPerTable (
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QTableView>
+#include <QLabel>
 #include <QSqlRelationalTableModel>
+#include <QSettings>
 
 class DebugViewManager : public QObject {
     Q_OBJECT
 public:
     QWidget * wdg;
+    QLabel * lbl1;
     QTableView * tv1;
     QTableView * tv2;
     QSqlTableModel *model1;
@@ -385,14 +388,40 @@ public:
         tv2->setModel (model2);
         main_lay->addWidget (tv2);
 
+        lbl1 = new QLabel (wdg);
+        main_lay->addWidget (lbl1);
+
         wdg->setLayout (main_lay);
 
+        QSettings settings ("resqliteun", "DebugViewManager");
+        wdg->restoreGeometry (settings.value("geometry").toByteArray());
+
         startTimer(500);
+    }
+
+    void closeEvent (QCloseEvent *event)
+    {
     }
 
     virtual void timerEvent (QTimerEvent *event) {
         model1->select ();
         model2->select ();
+        ReSqliteUn * inst = ReSqliteUn::instance();
+        if (inst == NULL) {
+            lbl1->setText("No active instance");
+        } else {
+            if (inst->is_active_) {
+                if (inst->in_undo_) {
+                    lbl1->setText ("In UnDo");
+                } else {
+                    lbl1->setText ("In ReDo");
+                }
+            } else {
+                lbl1->setText ("Inactive");
+            }
+        }
+        QSettings settings ("resqliteun", "DebugViewManager");
+        settings.setValue ("geometry", wdg->saveGeometry());
     }
 
 };

@@ -468,19 +468,19 @@ ReSqliteUnUtil::SqLiteResult ReSqliteUn::stepsToGoal (
     sqlite3_stmt *stmt = NULL;
     for (;;) {
 
-        static const char * for_undo =
+        static const char * stm_undo =
                 "SELECT COUNT(id) FROM " RESQUN_TBL_IDX " "
                     "WHERE status=" STR(RESQUN_MARK_UNDO) " "
                     "AND id>=?;\n";
-        static const char * for_redo =
+        static const char * stm_redo =
                 "SELECT MIN(id) FROM " RESQUN_TBL_IDX " "
                     "WHERE status=" STR(RESQUN_MARK_REDO) " "
                     "AND id <=?;\n";
         const char * statement = NULL;
         if (for_undo) {
-            statement = for_undo;
+            statement = stm_undo;
         } else {
-            statement = for_redo;
+            statement = stm_redo;
         }
 
         rc = sqlite3_prepare_v2 (dtb_, statement, -1, &stmt, NULL);
@@ -588,19 +588,19 @@ qint64 ReSqliteUn::getActiveId (UndoRedoType ty) const
     ReSqliteUn::SqLiteResult rc = SQLITE_OK;
     sqlite3_stmt *stmt = NULL;
     for (;;) {
-        static const char * for_undo =
+        static const char * stm_undo =
                 "SELECT MAX(id) FROM " RESQUN_TBL_IDX " "
                     "WHERE status=" STR(RESQUN_MARK_UNDO) ";\n";
-        static const char * for_redo =
+        static const char * stm_redo =
                 "SELECT MIN(id) FROM " RESQUN_TBL_IDX " "
                     "WHERE status=" STR(RESQUN_MARK_REDO) ";\n";
         const char * statement = NULL;
         switch (ty) {
         case UndoType: {
-            statement = for_undo;
+            statement = stm_undo;
             break; }
         case RedoType: {
-            statement = for_redo;
+            statement = stm_redo;
             break; }
         case NoUndoRedo:
         case CurrentUndoRedo:
@@ -608,12 +608,12 @@ qint64 ReSqliteUn::getActiveId (UndoRedoType ty) const
         default: {
             if (is_active_) {
                 if (in_undo_) {
-                    statement = for_undo;
+                    statement = stm_undo;
                 } else {
-                    statement = for_redo;
+                    statement = stm_redo;
                 }
             } else {
-                statement = for_undo;
+                statement = stm_undo;
             }
             break; }
         }

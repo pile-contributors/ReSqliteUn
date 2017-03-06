@@ -473,7 +473,7 @@ ReSqliteUnUtil::SqLiteResult ReSqliteUn::stepsToGoal (
                     "WHERE status=" STR(RESQUN_MARK_UNDO) " "
                     "AND id>=?;\n";
         static const char * stm_redo =
-                "SELECT MIN(id) FROM " RESQUN_TBL_IDX " "
+                "SELECT COUNT(id) FROM " RESQUN_TBL_IDX " "
                     "WHERE status=" STR(RESQUN_MARK_REDO) " "
                     "AND id <=?;\n";
         const char * statement = NULL;

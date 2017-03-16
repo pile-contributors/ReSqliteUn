@@ -17,7 +17,7 @@
 /*  INCLUDES    ------------------------------------------------------------ */
 
 #include <sqlite/sqlite3ext.h>
-SQLITE_EXTENSION_INIT1
+static SQLITE_EXTENSION_INIT1
 
 #include "resqliteun.h"
 #include "resqliteun-private.h"

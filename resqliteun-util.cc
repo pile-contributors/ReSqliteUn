@@ -98,8 +98,8 @@ QString ReSqliteUnUtil::sqlTriggers (
     RESQLITEUN_TRACE_ENTRY;
     sqlite3_stmt *stmt;
 
-    QString statement = QStringLiteral("PRAGMA table_info(") % table %
-            QStringLiteral(");\n");
+    QString statement = QString("PRAGMA table_info(") % table %
+            QString(");\n");
 
     int rc = sqlite3_prepare16 (
                 dtb_, statement.utf16 (),
@@ -144,8 +144,8 @@ QString ReSqliteUnUtil::sqlTriggers (
         del_col_name.append (name);
 
         del_col_value.append (
-                    comma % QStringLiteral("'||quote(OLD.") % name %
-                    QStringLiteral(")||'"));
+                    comma % QString("'||quote(OLD.") % name %
+                    QString(")||'"));
 
         // Primary keys excluded from those that trigger an undo step.
         if (is_primary)
@@ -160,8 +160,8 @@ QString ReSqliteUnUtil::sqlTriggers (
                 upd_tbl_value.append (comma);
             }
             upd_tbl_value.append (
-                        name % QStringLiteral("='||quote(OLD.") % name %
-                        QStringLiteral(")||'"));
+                        name % QString("='||quote(OLD.") % name %
+                        QString(")||'"));
             break; }
         case NoTriggerForUpdate: {
             break; }
@@ -209,11 +209,13 @@ QString ReSqliteUnUtil::sqlTriggers (
  */
 QString ReSqliteUnUtil::sqlInsertTrigger (const QString & s_table)
 {
-    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_i \n"
-        "AFTER INSERT ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 \n"
+    return QString("CREATE TEMP TRIGGER ") % QString(RESQUN_PREFIX) 
+        % s_table % QString("_i \n"
+        "AFTER INSERT ON ") % s_table % QString(" WHEN (SELECT ") % 
+        QString(RESQUN_FUN_ACTIVE) % QString("())=1 \n"
         "BEGIN INSERT INTO resqun_sqlite_undo(sql,idxid) VALUES (\n"
-                "'DELETE FROM ") % s_table % QStringLiteral(" WHERE rowid='||NEW.rowid||';',\n"
-                RESQUN_FUN_GETID "()\n"
+                "'DELETE FROM ") % s_table % QString(" WHERE rowid='||NEW.rowid||';',\n")  %
+                QString(RESQUN_FUN_GETID) % QString("()\n"
             ");\n"
         "END;\n");
 }
@@ -244,12 +246,13 @@ QString ReSqliteUnUtil::sqlDeleteTrigger (
         const QString &s_table, const QString & s_column_names,
         const QString & s_column_values)
 {
-    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_d \n"
-             "BEFORE DELETE ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 \n"
+    return QString("CREATE TEMP TRIGGER ") % QString(RESQUN_PREFIX) % s_table % QString("_d \n"
+             "BEFORE DELETE ON ") % s_table % QString(" WHEN (SELECT ") %
+             QString(RESQUN_FUN_ACTIVE) % QString("())=1 \n"
              "BEGIN INSERT INTO resqun_sqlite_undo(sql,idxid) VALUES (\n"
-                    "'INSERT INTO ") % s_table % QStringLiteral("(rowid,") % s_column_names % QStringLiteral(") "
-                        "VALUES('||OLD.rowid||'") % s_column_values % QStringLiteral(");', \n"
-                    RESQUN_FUN_GETID "()\n"
+                    "'INSERT INTO ") % s_table % QString("(rowid,") % s_column_names % QString(") "
+                        "VALUES('||OLD.rowid||'") % s_column_values % QString(");', \n") %
+                    QString(RESQUN_FUN_GETID) % QString("()\n"
                 ");\n"
              "END;\n");
 }
@@ -284,14 +287,15 @@ QString ReSqliteUnUtil::sqlDeleteTrigger (
 QString ReSqliteUnUtil::sqlUpdateTriggerPerColumn (
         const QString &s_table, const QString &s_column)
 {
-    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_u_") % s_column % QStringLiteral(" \n"
-             "AFTER UPDATE OF ") % s_column % QStringLiteral(" "
-                 "ON ") % s_table % QStringLiteral(" "
-                 "WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 \n"
+    return QString("CREATE TEMP TRIGGER ") % QString(RESQUN_PREFIX) % 
+             s_table % QString("_u_") % s_column % QString(" \n"
+             "AFTER UPDATE OF ") % s_column % QString(" "
+                 "ON ") % s_table % QString(" "
+                 "WHEN (SELECT ") % QString(RESQUN_FUN_ACTIVE) % QString("())=1 \n"
              "BEGIN INSERT INTO resqun_sqlite_undo(sql,idxid) VALUES (\n"
-                     "'UPDATE ") % s_table % QStringLiteral(" SET ") % s_column % QStringLiteral(" "
-                         "WHERE rowid='||OLD.rowid||';',\n"
-                     RESQUN_FUN_GETID "()\n"
+                     "'UPDATE ") % s_table % QString(" SET ") % s_column % QString(" "
+                         "WHERE rowid='||OLD.rowid||';',\n") %
+                     QString(RESQUN_FUN_GETID) % QString("()\n"
                  ");\n"
              "END;\n");
 }
@@ -327,14 +331,16 @@ QString ReSqliteUnUtil::sqlUpdateTriggerPerColumn (
 QString ReSqliteUnUtil::sqlUpdateTriggerPerTable (
         const QString &s_table, const QString & s_column_list)
 {
-    return QStringLiteral("CREATE TEMP TRIGGER " RESQUN_PREFIX) % s_table % QStringLiteral("_u \n"
-         "AFTER UPDATE ON ") % s_table % QStringLiteral(" WHEN (SELECT " RESQUN_FUN_ACTIVE "())=1 \n"
+    return QString("CREATE TEMP TRIGGER ") % QString(RESQUN_PREFIX) % 
+         s_table % QString("_u \n"
+         "AFTER UPDATE ON ") % s_table % QString(" WHEN (SELECT ") % 
+         QString(RESQUN_FUN_ACTIVE) % QString("())=1 \n"
          "BEGIN INSERT INTO resqun_sqlite_undo(sql,idxid) VALUES (\n"
-                  "'UPDATE ") % s_table % QStringLiteral(" SET ") % s_column_list % QStringLiteral(" "
-                      "WHERE rowid='||OLD.rowid||';',\n"
-                  RESQUN_FUN_GETID "()\n"
+                  "'UPDATE ") % s_table % QString(" SET ") % s_column_list % QString(" "
+                      "WHERE rowid='||OLD.rowid||';',\n") %
+                  QString(RESQUN_FUN_GETID) % QString("()\n"
              ");\n"
-                                   "END;\n");
+             "END;\n");
 }
 /* ========================================================================= */
 #include <QWidget>
